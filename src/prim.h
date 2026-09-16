@@ -55,23 +55,66 @@ inline void box_span(float x0, float y0, float z0,
 // ---------------------------------------------------------------------------
 // Cylinder along +Y with its base at y = 0, capped at both ends.  FR-7 needs
 // the blank to rise from y = 0 so the squash can be scaled about its base.
+//
+// `chamfer` breaks both end edges at 45 degrees, and it is not decoration.
+// Every other normal in this scene lies in an axis plane - boxes face along
+// +/-x, +/-y, +/-z, and a cylinder's wall normals stay in the plane normal to
+// its axis.  The half vector between the press lamp (69 degrees above the die)
+// and the default camera (16 degrees above the belt) sits at about 43 degrees,
+// so NO surface in the scene faced it and the mandatory specular highlight
+// evaluated to about 1e-12 everywhere at ns 89.6.  A 45-degree chamfer supplies
+// normals at every azimuth on a 45-degree cone, which contains the half vector
+// to within about 1.5 degrees - and that is the whole difference between a
+// blazing highlight and none at all.  Real stamped parts have a broken edge
+// anyway, so this costs nothing in honesty.
 // ---------------------------------------------------------------------------
-inline void cyl(float r, float h, int slices) {
-    glBegin(GL_QUAD_STRIP);
+inline void cyl(float r, float h, int slices, float chamfer = 0.0f) {
+    float c = chamfer;
+    if (c > 0.4f * h) c = 0.4f * h;
+    if (c > 0.4f * r) c = 0.4f * r;
+    const float ri = r - c;                 // radius at the two end caps
+    const float k  = 0.70710678f;           // a 45-degree chamfer's normal
+
+    // Surface of revolution, walked bottom to top.  For every band the lower
+    // ring is emitted before the upper one and the azimuth increases, which is
+    // what makes the quads wind CCW as seen from outside.
+    if (c > 0.0f) {                         // bottom chamfer, normal down+out
+        glBegin(GL_QUAD_STRIP);
+        for (int i = 0; i <= slices; ++i) {
+            const float a = 2.0f * PI * i / slices, cs = cosf(a), sn = sinf(a);
+            glNormal3f(k * cs, -k, k * sn);
+            glVertex3f(ri * cs, 0.0f, ri * sn);
+            glVertex3f(r  * cs, c,    r  * sn);
+        }
+        glEnd();
+    }
+
+    glBegin(GL_QUAD_STRIP);                 // the wall
     for (int i = 0; i <= slices; ++i) {
-        const float a = 2.0f * PI * i / slices, c = cosf(a), s = sinf(a);
-        glNormal3f(c, 0.0f, s);
-        glVertex3f(r * c, 0.0f, r * s);
-        glVertex3f(r * c, h,    r * s);
+        const float a = 2.0f * PI * i / slices, cs = cosf(a), sn = sinf(a);
+        glNormal3f(cs, 0.0f, sn);
+        glVertex3f(r * cs, c,     r * sn);
+        glVertex3f(r * cs, h - c, r * sn);
     }
     glEnd();
+
+    if (c > 0.0f) {                         // top chamfer, normal up+out
+        glBegin(GL_QUAD_STRIP);
+        for (int i = 0; i <= slices; ++i) {
+            const float a = 2.0f * PI * i / slices, cs = cosf(a), sn = sinf(a);
+            glNormal3f(k * cs, k, k * sn);
+            glVertex3f(r  * cs, h - c, r  * sn);
+            glVertex3f(ri * cs, h,     ri * sn);
+        }
+        glEnd();
+    }
 
     glBegin(GL_TRIANGLE_FAN);                       // top cap, +Y
     glNormal3f(0, 1, 0);
     glVertex3f(0, h, 0);
     for (int i = slices; i >= 0; --i) {
         const float a = 2.0f * PI * i / slices;
-        glVertex3f(r * cosf(a), h, r * sinf(a));
+        glVertex3f(ri * cosf(a), h, ri * sinf(a));
     }
     glEnd();
 
@@ -80,17 +123,17 @@ inline void cyl(float r, float h, int slices) {
     glVertex3f(0, 0, 0);
     for (int i = 0; i <= slices; ++i) {
         const float a = 2.0f * PI * i / slices;
-        glVertex3f(r * cosf(a), 0.0f, r * sinf(a));
+        glVertex3f(ri * cosf(a), 0.0f, ri * sinf(a));
     }
     glEnd();
 }
 
 // Every rotating shaft in the scene is parallel to z (PRD 4.1), so this is the
 // form most of the machine uses.  Base at z = 0, extending to z = +h.
-inline void cyl_z(float r, float h, int slices) {
+inline void cyl_z(float r, float h, int slices, float chamfer = 0.0f) {
     glPushMatrix();
     glRotatef(90.0f, 1, 0, 0);      // maps +Y to +Z
-    cyl(r, h, slices);
+    cyl(r, h, slices, chamfer);
     glPopMatrix();
 }
 

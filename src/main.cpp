@@ -1,9 +1,9 @@
 // "Quarter Turn" - an automated stamping line in OpenGL.
 //
-// Milestone 2: geometry and motion.  Every object in PRD 4.2 is modelled and
-// every mechanism in FR-3 to FR-7 runs.  Lighting, materials and the three
-// shading modes (FR-10, FR-11, FR-12) are the next milestone; the placeholder
-// light set up in init() is scaffolding and is marked as such.
+// The entire animation state of the scene is one accumulating float and one
+// integer, and every visible motion - five meshing gears, a press, an
+// intermittent belt and the parts it carries - is a closed-form function of
+// them, evaluated inside the render loop.
 //
 // GLEW must be included before freeglut, and glewInit() must run after
 // glutCreateWindow() because it needs a live context (PRD 8).
@@ -16,6 +16,7 @@
 
 #include "config.h"
 #include "kinematics.h"
+#include "lighting.h"
 #include "scene.h"
 
 using namespace cfg;
@@ -31,6 +32,11 @@ static float ppm     = PPM_DEFAULT;            // one revolution is one part
 static bool  running = true;
 static bool  wireframe = false;
 static float frame_ms = 0.0f;
+
+// Rendering state (PRD FR-12, FR-13)
+static lighting::Mode shading = lighting::GOURAUD;
+static bool fill_light = true;
+static bool normalize_on = true;
 
 // Camera
 static int   preset = 1;
@@ -119,7 +125,7 @@ static void hud() {
     const float h7 = kin::press_blank_h(theta);
     const long  parts = cycles + (d >= 180.0f ? 1 : 0);
 
-    char b[160];
+    char b[200];
     float y = (float)win_h - 22.0f;
     glColor3f(0.95f, 0.95f, 0.90f);
     snprintf(b, sizeof b, "QUARTER TURN   theta %6.1f deg   %-8s  %s",
@@ -144,6 +150,36 @@ static void hud() {
              frame_ms > 0.0f ? (1000.0f / frame_ms) / 0.6f : 0.0f);
     text(14, y, b); y -= 18;
 
+    // FR-12: which shading model is on screen, and which specular term it is.
+    // The fixed pipeline gives Blinn-Phong (N.H)^ns; the shader gives true
+    // Phong (V.R)^ns.  Naming both is the whole argument of the feature.
+    const bool phong = (shading == lighting::PHONG) && lighting::g_shader_ok;
+    glColor3f(0.95f, 0.88f, 0.70f);
+    snprintf(b, sizeof b, "shading %-18s %-28s  fill light %s",
+             phong ? "PHONG (per-pixel)" : lighting::mode_name(shading),
+             phong ? "true Phong  (V.R)^ns" : "Blinn-Phong (N.H)^ns, per vertex",
+             fill_light ? "on" : "off");
+    text(14, y, b); y -= 18;
+
+    // FR-13: the n key toggles fixed-function state.  In Phong mode the shader
+    // is handed the same flag, so the key does the same thing in all three
+    // modes - which is why nothing here is greyed out.
+    if (normalize_on) glColor3f(0.55f, 0.60f, 0.62f);
+    else              glColor3f(1.00f, 0.72f, 0.25f);
+    snprintf(b, sizeof b, "GL_NORMALIZE %-3s  %s", normalize_on ? "on" : "OFF",
+             normalize_on
+               ? "(n: turn off to break the stamped blanks' normals)"
+               : "<- stamped blank tops blow out, rims go dull;"
+                 " unstamped blanks are unchanged");
+    text(14, y, b); y -= 18;
+
+    if (!lighting::g_shader_ok) {
+        glColor3f(1.0f, 0.45f, 0.30f);
+        snprintf(b, sizeof b, "Phong shader unavailable - %s",
+                 lighting::g_shader_error);
+        text(14, y, b); y -= 18;
+    }
+
     if (interlock_faults) {
         glColor3f(1.0f, 0.3f, 0.2f);
         snprintf(b, sizeof b, "INTERLOCK FAULT x%ld - belt moved under the"
@@ -156,8 +192,9 @@ static void hud() {
     }
 
     glColor3f(0.60f, 0.60f, 0.62f);
-    text(14, 14, "SPACE run/stop   . step 5deg   UP/DOWN speed   LEFT/RIGHT"
-                 " orbit   1 2 3 views   w wireframe   r reset   ESC quit");
+    text(14, 32, "SPACE run/stop   . step 5deg   UP/DOWN speed   LEFT/RIGHT"
+                 " orbit   1 2 3 views   r reset   ESC quit");
+    text(14, 14, "s shading mode   l fill light   n GL_NORMALIZE   w wireframe");
 
     glPopMatrix();                              // 5. restore both matrices
     glMatrixMode(GL_PROJECTION); glPopMatrix();
@@ -175,8 +212,11 @@ static void display() {
     glLoadIdentity();
     apply_camera();
 
-    // FR-10 will set the two lights here, after the camera transform and
-    // before any model transform, in one function called from this one place.
+    // Both lights' positions and the spot direction are re-specified here,
+    // after the camera transform and before any model transform.  This is the
+    // one place it happens (PRD FR-10).
+    lighting::place_lights();
+    lighting::apply_mode(shading, normalize_on);
 
     glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
     scene::draw(theta, cycles);
@@ -213,6 +253,20 @@ static void keyboard(unsigned char k, int, int) {
     case ' ': running = !running; break;
     case '.': if (!running) step_theta(STEP_DEG); break;   // forward only
     case 'w': case 'W': wireframe = !wireframe; break;
+    case 's': case 'S':
+        shading = (lighting::Mode)((shading + 1) % 3);
+        break;
+    case 'l': case 'L':
+        fill_light = !fill_light;
+        lighting::set_fill(fill_light);
+        break;
+    case 'n': case 'N':
+        // Toggles GL_NORMALIZE for the fixed pipeline.  Phong mode does not
+        // use that state, so the shader is handed the flag as a uniform and
+        // skips its own normalize() to match - see shaders.h (PRD FR-13).
+        normalize_on = !normalize_on;
+        if (normalize_on) glEnable(GL_NORMALIZE); else glDisable(GL_NORMALIZE);
+        break;
     case '1': preset = 1; orbit = 0.0f; break;
     case '2': preset = 2; orbit = 0.0f; break;
     case '3': preset = 3; orbit = 0.0f; break;
@@ -222,7 +276,6 @@ static void keyboard(unsigned char k, int, int) {
         break;
     default: break;
     }
-    // 's' shading mode, 'l' fill light and 'n' GL_NORMALIZE arrive with FR-10.
 }
 
 static void special(int k, int, int) {
@@ -284,22 +337,11 @@ static void init() {
     glShadeModel(GL_SMOOTH);
     glEnable(GL_NORMALIZE);       // FR-7: the blank squash is a non-uniform scale
 
-    // ---- SCAFFOLD -----------------------------------------------------------
-    // A single default headlight so the models are readable while the geometry
-    // is being built.  PRD FR-10's two-light rig and FR-11's six materials
-    // replace this entire block in the next milestone; nothing else in the
-    // project depends on it.
-    glEnable(GL_LIGHTING);
-    glEnable(GL_LIGHT0);
-    glEnable(GL_COLOR_MATERIAL);
-    glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
-    const GLfloat pos[4] = { 0.35f, 0.75f, 0.55f, 0.0f };
-    const GLfloat dif[4] = { 0.95f, 0.95f, 0.95f, 1.0f };
-    const GLfloat amb[4] = { 0.30f, 0.30f, 0.34f, 1.0f };
-    glLightfv(GL_LIGHT0, GL_POSITION, pos);
-    glLightfv(GL_LIGHT0, GL_DIFFUSE,  dif);
-    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, amb);
-    // ---- end SCAFFOLD -------------------------------------------------------
+    // FR-10: the two-light rig, and FR-12: the GLSL Phong program.  Materials
+    // come from glMaterialfv per part (FR-11), so GL_COLOR_MATERIAL stays off
+    // and glColor3f affects nothing but the unlit HUD.
+    lighting::init_lights();
+    lighting::build_shader();
 
     scene::build_lists();
     last_B = kin::belt_travel(theta, cycles);

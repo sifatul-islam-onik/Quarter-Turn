@@ -92,6 +92,11 @@ constexpr float LEG_X0 = -2.00f, LEG_X1 = 3.70f, LEG_W = 0.12f;
 // ---- Blanks (PRD FR-6, FR-7) -----------------------------------------------
 constexpr float BLANK_R = 0.18f, BLANK_H = 0.20f, BLANK_H_FLAT = 0.10f;
 constexpr int   BLANK_SLICES = 14;    // deliberately coarse: FR-12 acceptance
+// A broken edge on the polished parts.  Without it nothing in the scene faces
+// the half vector and the mandatory specular highlight does not exist at all -
+// the reasoning is in prim.h, above cyl().
+constexpr float BLANK_CHAMFER = 0.030f;
+constexpr float PART_CHAMFER  = 0.025f;   // rollers, crank disc, pins, shafts
 constexpr int   PRESS_STATION = 7;    // furthest upstream station the
                                       // two-idler train can reach
 constexpr int   LABELS = 9;           // blanks carry labels 1..9
@@ -143,6 +148,24 @@ constexpr float STACK_X = 5.50f, STACK_Z = -0.80f;
 constexpr float STACK_POST_R = 0.05f, STACK_POST_H = 5.50f;
 constexpr float STACK_R = 0.10f, STACK_SEG_H = 0.25f;
 constexpr float STACK_Y0 = 5.55f;     // green, amber, red upward
+
+// ---- Lighting (PRD FR-10) --------------------------------------------------
+// Light 0 - press lamp, a spotlight over the die.  The cone is about 2.4 in
+// radius at die height, so the pool covers the press, the stations either side
+// of it, and the crank gear behind.  The attenuation coefficients are chosen
+// so that the slides' radial formula 1/(a0 + a1 d + a2 d^2) is genuinely in
+// play: it gives 0.70 at the die, 5.22 away, and about 0.5 on the floor.
+constexpr float SPOT_X = 2.115f, SPOT_Y = 8.0f, SPOT_Z = 1.8f;
+constexpr float AIM_X  = 2.115f, AIM_Y  = 3.10f, AIM_Z = 0.0f;
+constexpr float SPOT_CUTOFF = 25.0f, SPOT_EXPONENT = 10.0f;
+constexpr float SPOT_A0 = 1.0f, SPOT_A1 = 0.03f, SPOT_A2 = 0.01f;
+
+// Light 1 - fill, a plain point light.  Its job is to keep the Geneva wheel,
+// the tail of the line and the dark motor readable outside the spot, without
+// washing out the cone.  A key toggles it, so the two-light sum can be
+// demonstrated as a sum.
+constexpr float FILL_X = 9.0f, FILL_Y = 6.0f, FILL_Z = 8.0f;
+constexpr float FILL_A0 = 1.0f, FILL_A1 = 0.01f, FILL_A2 = 0.002f;
 
 } // namespace cfg
 #endif

@@ -25,6 +25,7 @@
 
 #include "prim.h"
 #include "kinematics.h"
+#include "materials.h"
 
 namespace scene {
 
@@ -32,15 +33,15 @@ using namespace cfg;
 using namespace prim;
 using kin::LAY;
 
-// Placeholder colours.  PRD FR-11's six materials replace these wholesale in
-// the lighting milestone; the geometry below does not change when they do.
-inline void col(float r, float g, float b) { glColor3f(r, g, b); }
-inline void c_brass()   { col(0.72f, 0.53f, 0.11f); }
-inline void c_silver()  { col(0.76f, 0.78f, 0.80f); }
-inline void c_plastic() { col(0.13f, 0.13f, 0.14f); }
-inline void c_paint()   { col(0.20f, 0.34f, 0.26f); }
-inline void c_rubber()  { col(0.16f, 0.16f, 0.17f); }
-inline void c_concrete(){ col(0.45f, 0.44f, 0.42f); }
+// PRD FR-11's six materials.  Each is a compile-time constant, so baking one
+// into a display list is correct; the stack light's emission is the only
+// material in the scene that changes at runtime and it is set outside its list.
+inline void c_brass()   { mat::use(mat::BRASS);         }
+inline void c_silver()  { mat::use(mat::SILVER);        }
+inline void c_plastic() { mat::use(mat::BLACK_PLASTIC); }
+inline void c_paint()   { mat::use(mat::MACHINE_PAINT); }
+inline void c_rubber()  { mat::use(mat::RUBBER);        }
+inline void c_concrete(){ mat::use(mat::CONCRETE);      }
 
 // ---------------------------------------------------------------------------
 // Display lists
@@ -166,7 +167,7 @@ inline void build_lists() {
     c_silver();
     glPushMatrix();                                  // stub into the pinion
     glTranslatef(G1_X, G1_Y, MOTOR_Z1);
-    cyl_z(MOTOR_SHAFT_R, 0.14f, 12);
+    cyl_z(MOTOR_SHAFT_R, 0.14f, 12, PART_CHAMFER);
     glPopMatrix();
     glEndList();
 
@@ -281,13 +282,13 @@ inline void build_lists() {
     glEndList();
 
     glNewList(L(L_BLANK), GL_COMPILE);          // rises from y = 0 so FR-7 can
-    cyl(BLANK_R, BLANK_H, BLANK_SLICES);        // scale it about its base
+    cyl(BLANK_R, BLANK_H, BLANK_SLICES, BLANK_CHAMFER);   // about its base
     glEndList();
 
     glNewList(L(L_ROLLER), GL_COMPILE);
     glPushMatrix();
     glTranslatef(0, 0, -0.5f * ROLLER_LEN);
-    cyl_z(ROLLER_R, ROLLER_LEN, 24);
+    cyl_z(ROLLER_R, ROLLER_LEN, 24, PART_CHAMFER);
     glPopMatrix();
     // a key across the front end cap, so the roller's quarter turn is legible
     // on the half of it the belt does not wrap
@@ -340,15 +341,16 @@ inline void draw_press(float th, float sn, float cs) {
     glRotatef(90.0f - th * DEG, 0, 0, 1);
     glPushMatrix();
     glTranslatef(0, 0, PANEL_CZ + 0.5f * PANEL_D);
-    cyl_z(CRANK_SHAFT_R, CRANK_DISC_Z0 - (PANEL_CZ + 0.5f*PANEL_D), 14);
+    cyl_z(CRANK_SHAFT_R, CRANK_DISC_Z0 - (PANEL_CZ + 0.5f*PANEL_D), 14,
+          PART_CHAMFER);
     glPopMatrix();
     glPushMatrix();
     glTranslatef(0, 0, CRANK_DISC_Z0);
-    cyl_z(CRANK_DISC_R, CRANK_DISC_T, 20);
+    cyl_z(CRANK_DISC_R, CRANK_DISC_T, 20, PART_CHAMFER);
     glPopMatrix();
     glPushMatrix();                                  // crank pin
     glTranslatef(CRANK_R, 0.0f, CRANK_DISC_Z0 + CRANK_DISC_T);
-    cyl_z(CRANK_PIN_R, 0.11f, 12);
+    cyl_z(CRANK_PIN_R, 0.11f, 12, 0.015f);
     glPopMatrix();
     glPopMatrix();
 
@@ -364,7 +366,7 @@ inline void draw_press(float th, float sn, float cs) {
 
     glPushMatrix();                                  // wrist pin
     glTranslatef(PRESS_X, s, -0.06f);
-    cyl_z(0.06f, 0.12f, 12);
+    cyl_z(0.06f, 0.12f, 12, 0.015f);
     glPopMatrix();
 
     glPushMatrix();                                  // ram and punch
@@ -379,7 +381,7 @@ inline void draw_geneva_driver(const float* phi) {
     c_silver();
     glPushMatrix();
     glTranslatef(G5_X, G5_Y, GEN_SHAFT_Z0);
-    cyl_z(GEN_SHAFT_R, GEN_SHAFT_Z1 - GEN_SHAFT_Z0, 12);
+    cyl_z(GEN_SHAFT_R, GEN_SHAFT_Z1 - GEN_SHAFT_Z0, 12, 0.012f);
     glPopMatrix();
 
     glPushMatrix();
@@ -389,7 +391,7 @@ inline void draw_geneva_driver(const float* phi) {
              GEN_A + GEN_ARM_W, 0.5f*GEN_ARM_W, GEN_ARM_Z0 + GEN_ARM_T);
     glPushMatrix();
     glTranslatef(GEN_A, 0.0f, GEN_PIN_Z0);
-    cyl_z(GEN_PIN_R, GEN_PIN_Z1 - GEN_PIN_Z0, 12);
+    cyl_z(GEN_PIN_R, GEN_PIN_Z1 - GEN_PIN_Z0, 12, 0.012f);
     glPopMatrix();
     glPopMatrix();
 }
@@ -410,7 +412,7 @@ inline void draw_conveyor(float B) {
     glPushMatrix();                                  // stub through the frame
     glTranslatef(HEAD_X, ROLLER_Y, 0.5f * ROLLER_LEN);
     glRotatef(wa, 0, 0, 1);
-    cyl_z(GEN_STUB_R, GEN_WHEEL_Z0 - 0.5f * ROLLER_LEN, 12);
+    cyl_z(GEN_STUB_R, GEN_WHEEL_Z0 - 0.5f * ROLLER_LEN, 12, PART_CHAMFER);
     glPopMatrix();
 
     glPushMatrix();                                  // the wheel itself
@@ -464,17 +466,26 @@ inline void draw_stack_light(kin::Phase ph) {
     glPopMatrix();
 
     // green: APPROACH and RETREAT.  amber: INDEX.  red: STAMP.
+    //
+    // The lit lens carries a GL_EMISSION matching its colour and the unlit two
+    // a dim one, which is the + I_e term of the slides' illumination equation
+    // doing real work.  The emission changes every frame, so it is set OUTSIDE
+    // the display list, immediately before calling it: a list captures the
+    // values passed to glMaterialfv when it was compiled, not a reference to
+    // them, so an emission baked into the list could never change (PRD FR-15).
     const int lit = (ph == kin::PH_STAMP) ? 2 : (ph == kin::PH_INDEX ? 1 : 0);
-    const float base[3][3] = {{0.10f,0.85f,0.20f},{0.95f,0.65f,0.05f},
-                              {0.90f,0.12f,0.10f}};
+    const float base[3][3] = {{0.10f, 0.85f, 0.20f},
+                              {0.95f, 0.65f, 0.05f},
+                              {0.90f, 0.12f, 0.10f}};
     for (int i = 0; i < 3; ++i) {
-        const float k = (i == lit) ? 1.0f : 0.20f;
-        col(base[i][0]*k, base[i][1]*k, base[i][2]*k);
+        mat::use(mat::lens(base[i][0], base[i][1], base[i][2], i == lit));
         glPushMatrix();
         glTranslatef(STACK_X, STACK_Y0 + i * STACK_SEG_H, STACK_Z);
         glCallList(L(L_STACK_SEG));
         glPopMatrix();
     }
+    // Leave no emission behind for whatever is drawn next.
+    glMaterialfv(GL_FRONT, GL_EMISSION, mat::NO_EMISSION);
 }
 
 inline void draw(float th, long cycles) {
