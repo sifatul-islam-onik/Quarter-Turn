@@ -56,19 +56,8 @@ inline void box_span(float x0, float y0, float z0,
 // Cylinder along +Y with its base at y = 0, capped at both ends.  FR-7 needs
 // the blank to rise from y = 0 so the squash can be scaled about its base.
 //
-// `chamfer` breaks both end edges at 45 degrees, and it is not decoration.
-// Every other normal in this scene lies in an axis plane - boxes face along
-// +/-x, +/-y, +/-z, and a cylinder's wall normals stay in the plane normal to
-// its axis.  With the original press lamp 69 degrees above the die and the
-// default camera 16 degrees above the belt, the half vector sat at about 43
-// degrees, so NO surface in the scene faced it and the mandatory specular
-// highlight evaluated to about 1e-12 everywhere at ns 89.6.  A 45-degree
-// chamfer supplies normals at every azimuth on a 45-degree cone, which
-// contained that half vector to within about 1.5 degrees - the whole
-// difference between a blazing highlight and none at all.  The hanging bulbs
-// that replaced the lamp still rely on it: a blank catches a highlight on its
-// chamfer as it passes under a bulb.  Real stamped parts have a broken edge
-// anyway, so this costs nothing in honesty.
+// `chamfer` breaks both end edges at 45 degrees, as the polished parts of a
+// real machine have: a ring of quads between the wall and each cap.
 // ---------------------------------------------------------------------------
 inline void cyl(float r, float h, int slices, float chamfer = 0.0f) {
     float c = chamfer;
@@ -111,19 +100,20 @@ inline void cyl(float r, float h, int slices, float chamfer = 0.0f) {
         glEnd();
     }
 
-    glBegin(GL_TRIANGLE_FAN);                       // top cap, +Y
+    // The caps are single convex polygons rather than triangle fans.  They fill
+    // identically, but in line mode a polygon draws only its rim, where a fan
+    // would draw a spoke to every rim vertex.
+    glBegin(GL_POLYGON);                            // top cap, +Y
     glNormal3f(0, 1, 0);
-    glVertex3f(0, h, 0);
-    for (int i = slices; i >= 0; --i) {
+    for (int i = slices - 1; i >= 0; --i) {
         const float a = 2.0f * PI * i / slices;
         glVertex3f(ri * cosf(a), h, ri * sinf(a));
     }
     glEnd();
 
-    glBegin(GL_TRIANGLE_FAN);                       // bottom cap, -Y
+    glBegin(GL_POLYGON);                            // bottom cap, -Y
     glNormal3f(0, -1, 0);
-    glVertex3f(0, 0, 0);
-    for (int i = 0; i <= slices; ++i) {
+    for (int i = 0; i < slices; ++i) {
         const float a = 2.0f * PI * i / slices;
         glVertex3f(ri * cosf(a), 0.0f, ri * sinf(a));
     }
@@ -140,10 +130,8 @@ inline void cyl_z(float r, float h, int slices, float chamfer = 0.0f) {
 }
 
 // ---------------------------------------------------------------------------
-// Subdivided surfaces.  In fixed-function mode lighting is evaluated per
-// vertex, so a large surface near a light must be subdivided or the falloff
-// across it is lost to interpolation between four corners.  These are the
-// only places the project deliberately spends triangles (PRD FR-10).
+// Surfaces split into cells.  The edge pass outlines every cell, so the cell
+// counts (config.h) decide what grid, if any, shows on the surface.
 // ---------------------------------------------------------------------------
 
 // Flat grid in the XZ plane, facing +Y.
@@ -220,8 +208,7 @@ inline void slab_x(float x0, float x1, float y0, float y1,
 }
 
 // Rectangle from corner o along edges u and v, split nu by nv, facing u x v.
-// The room's walls and ceiling: the bulbs are evaluated per vertex, so a wall
-// drawn as a single quad would light as one flat colour.
+// The room's walls and ceiling, the window panes and the floor markings.
 inline void grid(float ox, float oy, float oz,
                  float ux, float uy, float uz,
                  float vx, float vy, float vz, int nu, int nv) {
@@ -243,9 +230,7 @@ inline void grid(float ox, float oy, float oz,
 }
 
 // Surface of revolution about +Y.  `p` is the profile as (radius, height),
-// walked bottom to top; a radius of 0 closes the end.  Each vertex normal is
-// the average of its two segments' normals, so the bulb's glass shades as a
-// smooth globe rather than a stack of bands.
+// walked bottom to top; a radius of 0 closes the end.  The bulb's glass.
 inline void lathe(const V2* p, int n, int slices) {
     V2 nrm[32];
     for (int i = 0; i < n; ++i) {
@@ -284,31 +269,43 @@ inline void lathe(const V2* p, int n, int slices) {
 // the Geneva wheel's four arms (a constant inner radius across the arm, rising
 // to meet the rim along each slot wall).  Where in[k] == out[k] the end cap
 // collapses to nothing, which is exactly what the wheel's arms want.
+//
+// Both boundaries are sampled finely, so drawn as lines every sample would
+// show as a spoke across the caps and a rib along the walls.  glEdgeFlag marks
+// which edges are the shape's outline: in line mode only an edge that starts
+// at a vertex flagged GL_TRUE is drawn.  Edge flags are ignored by strips and
+// fans, which is why everything here is GL_QUADS.
 // ---------------------------------------------------------------------------
 inline void wall_quad(V2 p, V2 q, float z0, float z1) {
     const float dx = q.x - p.x, dy = q.y - p.y;
     const float len = sqrtf(dx * dx + dy * dy);
     if (len < 1e-7f) return;                        // degenerate cap
     glNormal3f(dy / len, -dx / len, 0.0f);          // outward for a CCW walk
-    glVertex3f(p.x, p.y, z0); glVertex3f(q.x, q.y, z0);
-    glVertex3f(q.x, q.y, z1); glVertex3f(p.x, p.y, z1);
+    glEdgeFlag(GL_FALSE); glVertex3f(p.x, p.y, z0); // the caps outline p -> q,
+    glEdgeFlag(GL_FALSE); glVertex3f(q.x, q.y, z0); // and the edges along z
+    glEdgeFlag(GL_FALSE); glVertex3f(q.x, q.y, z1); // are sample boundaries
+    glEdgeFlag(GL_FALSE); glVertex3f(p.x, p.y, z1);
+    glEdgeFlag(GL_TRUE);
+}
+
+// Cap quad a -> b -> c -> d.  The a -> b edge is drawn only on the first quad
+// and the c -> d edge only on the last, closing the outline at each end.
+inline void cap_quad(V2 a, V2 b, V2 c, V2 d, float z, bool first, bool last) {
+    glEdgeFlag(first ? GL_TRUE : GL_FALSE); glVertex3f(a.x, a.y, z);
+    glEdgeFlag(GL_TRUE);                    glVertex3f(b.x, b.y, z);
+    glEdgeFlag(last ? GL_TRUE : GL_FALSE);  glVertex3f(c.x, c.y, z);
+    glEdgeFlag(GL_TRUE);                    glVertex3f(d.x, d.y, z);
 }
 
 inline void extrude_strip(const V2* in, const V2* out, int n,
                           float z0, float z1) {
+    glBegin(GL_QUADS);
     glNormal3f(0, 0, 1);                            // front cap
-    glBegin(GL_QUAD_STRIP);
-    for (int i = 0; i < n; ++i) {
-        glVertex3f(in[i].x,  in[i].y,  z1);
-        glVertex3f(out[i].x, out[i].y, z1);
-    }
-    glEnd();
+    for (int i = 0; i + 1 < n; ++i)
+        cap_quad(in[i], out[i], out[i + 1], in[i + 1], z1, i == 0, i + 2 == n);
     glNormal3f(0, 0,-1);                            // back cap
-    glBegin(GL_QUAD_STRIP);
-    for (int i = 0; i < n; ++i) {
-        glVertex3f(out[i].x, out[i].y, z0);
-        glVertex3f(in[i].x,  in[i].y,  z0);
-    }
+    for (int i = 0; i + 1 < n; ++i)
+        cap_quad(in[i + 1], out[i + 1], out[i], in[i], z0, i + 2 == n, i == 0);
     glEnd();
 
     glBegin(GL_QUADS);                              // walls, CCW around the face

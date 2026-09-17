@@ -6,8 +6,13 @@
 // them, evaluated inside the render loop.  The room around it adds switches:
 // two bulbs, an exhaust fan with its own spin, and the machine itself.
 //
+// There is no lighting in this build.  Every part is a flat colour, and a
+// second pass draws the same geometry as dark edge lines so the shapes still
+// read (see display()).
+//
 // GLEW must be included before freeglut, and glewInit() must run after
-// glutCreateWindow() because it needs a live context (PRD 8).
+// glutCreateWindow() because it needs a live context (PRD 8).  Windows ships
+// OpenGL 1.1, and the edge pass's glBlendColor is 1.4.
 #include <GL/glew.h>
 #include <GL/freeglut.h>
 
@@ -17,7 +22,6 @@
 
 #include "config.h"
 #include "kinematics.h"
-#include "lighting.h"
 #include "scene.h"
 #include "room.h"
 
@@ -43,9 +47,8 @@ static bool  fan_on  = true;
 static float fan_rps = FAN_RPS;                // lags the switch
 static float fan_deg = 0.0f;
 
-// Rendering state (PRD FR-12, FR-13)
-static lighting::Mode shading = lighting::GOURAUD;
-static bool normalize_on = true;
+// Rendering state
+static bool edges   = true;                    // e: the edge-line pass
 static bool details = false;                   // h: the full technical readout
 
 // Camera
@@ -221,9 +224,9 @@ static void switch_flags(bool* sw) {
 // ---------------------------------------------------------------------------
 // FR-14 - on-screen indications, kept minimal: one small panel with the
 // switches and the line's speed, a one-line key hint, and the full technical
-// readout behind `h`.  The five numbered steps in hud() are each load-bearing:
-// skipping any one produces text that is invisible, black, or behind the
-// machine, and all three failures look as if it was never drawn.
+// readout behind `h`.  The three numbered steps in hud() are each load-bearing:
+// skipping any one produces text that is off screen or behind the machine, and
+// both failures look as if it was never drawn.
 // ---------------------------------------------------------------------------
 static void* const SANS = GLUT_BITMAP_HELVETICA_12;
 static void* const MONO = GLUT_BITMAP_8_BY_13;     // numbers that must not jitter
@@ -278,18 +281,17 @@ static void status_panel(float& bottom) {
     static const char* LABEL[room::SW_COUNT] = { "Machine", "Left bulb",
                                                  "Right bulb", "Fan" };
     static const char* KEY[room::SW_COUNT]   = { "space", "[", "]", "f" };
-    static const char* MODE[3] = { "Flat", "Gouraud", "Phong" };
     bool sw[room::SW_COUNT];
     switch_flags(sw);
 
     const float x0 = 12.0f, x1 = x0 + 236.0f, pad = 12.0f, row = 20.0f;
     const float top = (float)win_h - 12.0f;
-    const int extra = (wireframe ? 1 : 0) + (normalize_on ? 0 : 1)
+    const int extra = (wireframe ? 1 : 0) + (edges ? 0 : 1)
                     + (interlock_faults ? 1 : 0);
     const float y_title = top - pad - 10.0f;
     const float y_sw0   = y_title - 8.0f - row;
     const float y_speed = y_sw0 - (room::SW_COUNT - 1) * row - 8.0f - row;
-    const float y_last  = y_speed - (2 + extra) * row;
+    const float y_last  = y_speed - (1 + extra) * row;
     bottom = y_last - pad + 2.0f;
     backing(x0, bottom, x1, top);
 
@@ -303,17 +305,14 @@ static void status_panel(float& bottom) {
     }
 
     char b[64];
-    const bool phong_ok = !(shading == lighting::PHONG && !lighting::g_shader_ok);
     float y = y_speed;
     snprintf(b, sizeof b, "%.0f ppm", ppm);
     status_row(x0, x1, y, "Speed", b, true, free_cam ? "+ -" : "up/dn"); y -= row;
     snprintf(b, sizeof b, "%ld", kin::parts_made(theta, cycles));
     status_row(x0, x1, y, "Parts", b, true, "");              y -= row;
-    status_row(x0, x1, y, "Shading", phong_ok ? MODE[shading] : "Gouraud*",
-               true, "s");                                     y -= row;
     // Non-default render states get a row only while they are on.
-    if (wireframe)     { status_row(x0, x1, y, "Wireframe", "ON", true, "w");  y -= row; }
-    if (!normalize_on) { status_row(x0, x1, y, "Normalize", "OFF", true, "n"); y -= row; }
+    if (wireframe) { status_row(x0, x1, y, "Wireframe", "ON", true, "w"); y -= row; }
+    if (!edges)    { status_row(x0, x1, y, "Edges", "OFF", true, "e");    y -= row; }
     if (interlock_faults) {
         snprintf(b, sizeof b, "x%ld", interlock_faults);
         glColor3f(1.0f, 0.35f, 0.25f);
@@ -351,23 +350,6 @@ static void details_panel(float top) {
              "motor %.0f rpm  %5.1f fps  gears freeze near %.0f ppm",
              ppm * 3.0f, fps, fps / 0.6f);
 
-    // FR-12: which specular term is on screen.  The fixed pipeline gives
-    // Blinn-Phong (N.H)^ns; the shader gives true Phong (V.R)^ns.  Naming both
-    // is the whole argument of the feature.
-    const bool phong = (shading == lighting::PHONG) && lighting::g_shader_ok;
-    snprintf(add(0.95f, 0.88f, 0.70f), 160, "%s",
-             phong ? "per-pixel true Phong (V.R)^ns"
-                   : "per-vertex Blinn-Phong (N.H)^ns");
-
-    // FR-13: in Phong mode the shader is handed the same flag, so n does the
-    // same thing in all three modes.
-    if (normalize_on)
-        snprintf(add(0.55f, 0.60f, 0.62f), 160,
-                 "GL_NORMALIZE on  (n breaks the stamped blanks' normals)");
-    else
-        snprintf(add(1.00f, 0.72f, 0.25f), 160,
-                 "GL_NORMALIZE OFF  stamped tops blow out, rims go dull");
-
     if (interlock_faults)
         snprintf(add(1.0f, 0.3f, 0.2f), 160,
                  "INTERLOCK FAULT x%ld - belt moved under the punch",
@@ -376,12 +358,8 @@ static void details_panel(float top) {
         snprintf(add(0.45f, 0.75f, 0.45f), 160,
                  "interlock ok - belt still while the punch is in the blank zone");
 
-    if (!lighting::g_shader_ok)
-        snprintf(add(1.0f, 0.45f, 0.30f), 160, "Phong shader unavailable - %.100s",
-                 lighting::g_shader_error);
-
     snprintf(add(0.50f, 0.52f, 0.56f), 160,
-             ". step 5 deg (stopped)   n GL_NORMALIZE   w wireframe");
+             ". step 5 deg (stopped)   w wireframe   e edges");
 
     const float x0 = 12.0f, pad = 12.0f, row = 17.0f;
     float w = 0.0f;
@@ -423,11 +401,9 @@ static void key_hint() {
 }
 
 static void hud() {
-    if (GLEW_VERSION_2_0) glUseProgram(0);      // 1. no shader on the glyphs
-    glDisable(GL_LIGHTING);                     // 2. glColor, not a material
-    glDisable(GL_DEPTH_TEST);                   // 3. never behind the machine
+    glDisable(GL_DEPTH_TEST);                   // 1. never behind the machine
     glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
-    gluOrtho2D(0, win_w, 0, win_h);             // 4. raster pos in screen space
+    gluOrtho2D(0, win_w, 0, win_h);             // 2. raster pos in screen space
     glMatrixMode(GL_MODELVIEW);  glPushMatrix(); glLoadIdentity();
 
     float bottom = 0.0f;
@@ -435,33 +411,76 @@ static void hud() {
     if (details) details_panel(bottom - 8.0f);
     key_hint();
 
-    glPopMatrix();                              // 5. restore both matrices
+    glPopMatrix();                              // 3. restore both matrices
     glMatrixMode(GL_PROJECTION); glPopMatrix();
     glMatrixMode(GL_MODELVIEW);
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_LIGHTING);
 }
 
 // ---------------------------------------------------------------------------
 // GLUT callbacks
 // ---------------------------------------------------------------------------
+static void draw_world(const bool* sw, bool edge_pass = false) {
+    scene::draw(theta, cycles);
+    room::draw(eye_pos, theta, cycles, fan_deg, sw, edge_pass);
+}
+
+// An edge pixel keeps this fraction of the face colour under it.
+static const GLfloat EDGE_K = 0.40f;
+
+// The edge pass cannot just set a dark colour, because every display list
+// sets its own colours as it draws.  So the colour is thrown away at the blend
+// instead: source factor GL_ZERO, destination factor GL_CONSTANT_COLOR, which
+// gives  result = face colour already in the framebuffer * EDGE_K.  Without
+// OpenGL 1.4 the fallback is the 1.1 logic op GL_CLEAR, which writes black.
+static void edge_blend(bool on) {
+    if (GLEW_VERSION_1_4) {
+        if (on) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ZERO, GL_CONSTANT_COLOR);
+            glBlendColor(EDGE_K, EDGE_K, EDGE_K, 1.0f);
+        } else {
+            glDisable(GL_BLEND);
+        }
+    } else {
+        if (on) { glEnable(GL_COLOR_LOGIC_OP); glLogicOp(GL_CLEAR); }
+        else      glDisable(GL_COLOR_LOGIC_OP);
+    }
+}
+
 static void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     apply_camera();
 
-    // Both bulbs' positions are re-specified here, after the camera transform
-    // and before any model transform.  This is the one place it happens.
-    lighting::place_lights();
-    lighting::apply_mode(shading, normalize_on);
-
     bool sw[room::SW_COUNT];
     switch_flags(sw);
-    glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
-    scene::draw(theta, cycles);
-    room::draw(eye_pos, theta, cycles, fan_deg, sw);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    if (wireframe) {                            // lines only, in each part's colour
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        draw_world(sw);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    } else if (!edges) {                        // flat colour only
+        draw_world(sw);
+    } else {
+        // Pass 1: the faces, each pushed slightly back in depth.  Without the
+        // offset an edge line and its own face land at the same depth and
+        // fight, so the line comes and goes along its length.
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(1.0f, 1.0f);
+        draw_world(sw);
+        glDisable(GL_POLYGON_OFFSET_FILL);
+
+        // Pass 2: the same geometry as lines, darkening the faces under them.
+        // Back-face culling and the depth test still apply to lines, so hidden
+        // edges stay hidden.  Depth is written, so where two quads share an
+        // edge the second line fails GL_LESS and it is not darkened twice.
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        edge_blend(true);
+        draw_world(sw, true);
+        edge_blend(false);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
     room::draw_glow(sw);                        // halos last, over everything
 
     hud();
@@ -493,24 +512,14 @@ static void keyboard(unsigned char k, int, int) {
     case ' ': running = !running; break;                  // machine switch
     case '.': if (!running) step_theta(STEP_DEG); break;   // forward only
     case 'w': case 'W': wireframe = !wireframe; break;
-    case 's': case 'S':
-        shading = (lighting::Mode)((shading + 1) % 3);
-        break;
+    case 'e': case 'E': edges = !edges; break;
     case '[': case '{': case ']': case '}': {             // bulb switches
         const int i = (k == ']' || k == '}') ? 1 : 0;
         bulb_on[i] = !bulb_on[i];
-        lighting::set_bulb(i, bulb_on[i]);
         break;
     }
     case 'f': case 'F': fan_on = !fan_on; break;          // fan switch
     case 'h': case 'H': details = !details; break;
-    case 'n': case 'N':
-        // Toggles GL_NORMALIZE for the fixed pipeline.  Phong mode does not
-        // use that state, so the shader is handed the flag as a uniform and
-        // skips its own normalize() to match - see shaders.h (PRD FR-13).
-        normalize_on = !normalize_on;
-        if (normalize_on) glEnable(GL_NORMALIZE); else glDisable(GL_NORMALIZE);
-        break;
     case '1': case '2': case '3': case '4':               // also leaves free cam
         preset = k - '0'; orbit = 0.0f;
         set_free_cam(false);
@@ -618,14 +627,6 @@ static void init() {
     glEnable(GL_DEPTH_TEST);      // hidden-surface elimination, PRD FR-15
     glEnable(GL_CULL_FACE);       // and the other half of it
     glCullFace(GL_BACK);
-    glShadeModel(GL_SMOOTH);
-    glEnable(GL_NORMALIZE);       // FR-7: the blank squash is a non-uniform scale
-
-    // FR-10: the two-light rig, and FR-12: the GLSL Phong program.  Materials
-    // come from glMaterialfv per part (FR-11), so GL_COLOR_MATERIAL stays off
-    // and glColor3f affects nothing but the unlit HUD.
-    lighting::init_lights();
-    lighting::build_shader();
 
     scene::build_lists();
     room::build_lists();        // after: it calls the machine's gear and blank lists

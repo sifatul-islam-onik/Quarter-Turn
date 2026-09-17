@@ -1,6 +1,6 @@
-// room.h - the building around the line: four walls, a beamed ceiling, the two
-// hanging bulbs that light everything, and what stands on the floor.  Not in
-// the PRD, which says "no factory building"; the deviation is in the README.
+// room.h - the building around the line: four walls, a beamed ceiling, two
+// hanging bulbs, and what stands on the floor.  Not in the PRD, which says "no
+// factory building"; the deviation is in the README.
 //
 // The machine does not know the room exists.  Nothing here feeds kinematics.
 // The parts counter is a closed-form function of (theta, cycles) like the
@@ -579,9 +579,9 @@ inline void build_lists() {
 // Per frame
 // ---------------------------------------------------------------------------
 
-// Seven-segment digits.  Like the stack light, the emission changes at run
-// time, so it is set here and never baked into a list.  Lit segments are
-// drawn in one pass and unlit in another, two material changes per frame.
+// Seven-segment digits.  Like the stack light, the colour changes at run time,
+// so it is set here and never baked into a list.  Lit segments are drawn in
+// one pass and unlit in another, two colour changes per frame.
 inline void draw_counter(long parts) {
     static const unsigned char SEG[10] = {           // bits a..g
         0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F };
@@ -612,7 +612,6 @@ inline void draw_counter(long parts) {
             }
         }
     }
-    glMaterialfv(GL_FRONT, GL_EMISSION, mat::NO_EMISSION);
 }
 
 // The cabinet's rockers and status lamps, drawn from the same flags the keys
@@ -635,13 +634,14 @@ inline void draw_switches(const bool* sw) {
         cyl_z(0.035f, 0.03f, 12);
         glPopMatrix();
     }
-    glMaterialfv(GL_FRONT, GL_EMISSION, mat::NO_EMISSION);
 }
 
 // `eye` is the camera position in world space, which decides the cutaway.
 // `sw` is indexed by Switch; `fan_deg` is the fan's own accumulated angle.
+// `edge_pass` leaves out the glass globes: outlined, their fine latitude and
+// longitude bands read as a wire cage rather than a bulb.
 inline void draw(const float* eye, float th, long cycles, float fan_deg,
-                 const bool* sw) {
+                 const bool* sw, bool edge_pass) {
     glCallList(L(R_FLOOR_ITEMS));
     draw_switches(sw);
 
@@ -664,6 +664,7 @@ inline void draw(const float* eye, float th, long cycles, float fan_deg,
 
     // The bulbs hang inside the room, so they stay in every view.
     glCallList(L(R_PENDANTS));
+    if (edge_pass) return;
     for (int i = 0; i < 2; ++i) {
         mat::use(sw[SW_BULB_L + i] ? mat::BULB_ON : mat::BULB_OFF);
         glPushMatrix();
@@ -671,23 +672,13 @@ inline void draw(const float* eye, float th, long cycles, float fan_deg,
         glCallList(L(R_GLOBE));
         glPopMatrix();
     }
-    glMaterialfv(GL_FRONT, GL_EMISSION, mat::NO_EMISSION);
 }
 
-// A soft halo round each lit bulb, so it reads as the source of the light: a
-// camera-facing disc whose alpha falls from the centre to the rim, blended
-// additively.  It is drawn last and outside the lighting - no program, no
-// lighting, and smooth shading even in FLAT mode, where the rim's zero alpha
-// would otherwise flood the whole disc.  Depth is tested, so the machine still
-// hides a bulb behind it, but not written, so the halo cuts no holes.
+// A soft halo round each lit bulb, so it reads as switched on: a camera-facing
+// disc whose alpha falls from the centre to the rim, blended additively.  It
+// is drawn last, over everything.  Depth is tested, so the machine still hides
+// a bulb behind it, but not written, so the halo cuts no holes.
 inline void draw_glow(const bool* sw) {
-    GLint prog = 0, shade = GL_SMOOTH;
-    if (GLEW_VERSION_2_0) {
-        glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
-        glUseProgram(0);
-    }
-    glGetIntegerv(GL_SHADE_MODEL, &shade);
-
     // With only the camera on the modelview stack, the matrix's first two rows
     // are the camera's right and up vectors in world space.
     GLfloat m[16];
@@ -695,8 +686,6 @@ inline void draw_glow(const bool* sw) {
     const float rx = m[0], ry = m[4], rz = m[8];
     const float ux = m[1], uy = m[5], uz = m[9];
 
-    glDisable(GL_LIGHTING);
-    glShadeModel(GL_SMOOTH);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     glDepthMask(GL_FALSE);
@@ -717,9 +706,6 @@ inline void draw_glow(const bool* sw) {
     }
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
-    glShadeModel((GLenum)shade);
-    glEnable(GL_LIGHTING);
-    if (GLEW_VERSION_2_0) glUseProgram((GLuint)prog);
 }
 
 } // namespace room

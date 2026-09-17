@@ -2,6 +2,11 @@
 
 An automated stamping line in OpenGL — CSE 4207 Computer Graphics, KUET.
 
+> **Branch `unlit-demo`: no lighting and no shading.** Every part is drawn in a
+> flat colour, and a second pass outlines the geometry so the shapes still
+> read. This is the build for the modelling, transformation, animation and
+> viewing demo. Lighting, materials and the three shading modes are on `main`.
+
 A motor drives a train of five meshing brass gears. The largest carries a crank,
 and a crank-slider drives a press ram over a conveyor. The last gear turns a
 Geneva mechanism on the conveyor's head roller, converting continuous rotation
@@ -11,8 +16,8 @@ belt, stop under the press, are flattened while the belt is locked, pass under
 an exit hood, then tip off the head roller, slide down a chute and pile up in a
 bin. The line stands in a cutaway workshop (walls, windows, a
 roll-up door, a workbench, pipework, ceiling beams), whose near walls drop away
-as the camera orbits. Two hanging bulbs light it, and the bulbs, the exhaust fan
-and the machine each have their own switch.
+as the camera orbits. Two bulbs hang over the line, and the bulbs, the exhaust
+fan and the machine each have their own switch.
 
 **The technical claim:** the machine's entire animation state is one
 accumulating float (`theta`, the crankshaft angle) and one integer (`cycles`).
@@ -50,8 +55,7 @@ or, from the MSYS2 shell: `make`, `make run`, `make check`, `make release`.
 | free camera: `↑` `↓` `←` `→` | fly forward / back along the view, strafe left / right |
 | free camera: `PgUp` `PgDn` | rise / sink |
 | free camera: left-drag | look around |
-| `s` | shading mode: flat → Gouraud → Phong |
-| `n` | `GL_NORMALIZE` on / off |
+| `e` | edge lines on / off |
 | `w` | wireframe |
 | `r` | reset to `theta` = 90°, `cycles` = 0 |
 | `Esc` | quit |
@@ -76,20 +80,27 @@ appear to stand still while the crank, ram and belt keep moving. They freeze at
 once because every gear in the train passes teeth at the same rate. The readout
 (`h`) prints the speed at which this happens for the current frame rate.
 
-**4. Three shading modes (`s`).** Watch a blank's chamfer as it passes under
-the left bulb: Gouraud smears a dull band across it, Phong resolves a tight white
-point. Flat shows hard facet boundaries on the crank disc and gear bodies. The
-fixed pipeline gives **Blinn-Phong** `(N·H)^ns`; the shader gives **true Phong**
-`(V·R)^ns` per fragment — the status panel names the mode and the readout (`h`)
-names the term. Switch one bulb off with `[` or `]` and its highlights and
-falloff go with it, in all three modes: the two lights are visibly a sum.
+**4. The hierarchy, in wireframe (`w`).** Stop the machine with `Space` and
+step with `.`. The crank disc turns about its shaft, the rod follows the pin,
+and the ram slides between its rails. Every gear is a child of the drive panel,
+not of the gear that drives it: a child inherits its parent's rotation, but a
+meshing gear turns the other way at a different rate. The brass and copper
+alternate along the train, so each mesh is between two colours.
 
-**5. The normal-transformation error (`n`).** With `GL_NORMALIZE` off the
-stamped blanks' tops blow out to white and their rims go dull, while unstamped
-blanks on the same belt are unchanged — the comparison sits in a single frame.
-The squash is the only `glScalef` in the scene, so nothing else moves.
-`GL_RESCALE_NORMAL` would be the wrong fix: it applies one correction factor,
-but here the walls need `√q` and the caps `1/q`.
+**5. Why the edges are there (`e`).** Without lighting, every face of a part is
+the same colour. Press `e`: the drive panel, the conveyor frame and the bin
+merge into one flat green shape, and a turning roller looks still. The edge
+pass draws the whole scene a second time as lines (`glPolygonMode(GL_LINE)`).
+Three details make it work:
+
+- `glPolygonOffset` pushes the faces back, so a line does not fight its own face in the depth buffer.
+- A blend of `GL_ZERO, GL_CONSTANT_COLOR` darkens the colour already in the framebuffer, because the display lists set their own colours.
+- Back-face culling and the depth test still apply to lines, so hidden edges stay hidden.
+
+**6. Viewing.** `1`–`4` are four `gluLookAt` presets, and `←` `→` orbit the
+eye about the look-at point. The walls between the camera and the machine
+disappear as it orbits. `c` hands the same eye to a free camera, whose view
+direction comes from a yaw and a pitch.
 
 ## Verification
 
@@ -110,24 +121,18 @@ inside the bin's walls below the rim, and that the full pile fits.
 
 Each is in the source next to the number it changes.
 
-**The polished parts have a 45° chamfer** (`prim.h`, `cyl()`). This is the one
-that matters. Every surface normal in the scene otherwise lies in an axis plane
-— boxes face along the axes, and a cylinder's wall normals stay in the plane
-normal to its axis. The half vector between the original press lamp (69° above
-the die) and the default camera (16° above the belt) sat at about 43°, so
-**nothing faced it**, and the mandatory specular highlight evaluated to about
-10⁻¹² everywhere at ns 89.6. It could not be fixed by moving the light: for a
-horizontal surface the light must sit at the camera's own elevation on the
-opposite side, which is behind the drive panel. A 45° chamfer supplies normals
-at every azimuth on a 45° cone, which contained the half vector to within about
-1.5°. Real stamped parts have a broken edge anyway. The slides' ns 89.6 is kept
-unchanged. The bulbs that replaced the lamp were placed for the same reason
-(see below).
+**No lighting on this branch.** A material is one flat colour set with
+`glColor` (`materials.h`), recorded into the display lists like any other call.
+The consequences:
 
-**Black plastic is lightened** (`materials.h`), exactly the escape hatch FR-11
-anticipates: `ka` 0 → 0.02 and `kd` 0.01 → 0.05, because the motor, magazine and
-hood sit against a dark panel, away from the light. `ks` and `ns` are
-untouched, so it still reads as plastic.
+- The surfaces that were split into cells for per-vertex lighting are one cell now. The exception is the floor, which is kept as 1.0 tiles because the tiles show the floor receding in perspective (`config.h`).
+- Cylinder caps are one `GL_POLYGON` instead of a triangle fan, so outlined they show a rim, not spokes (`prim.h`).
+- The Geneva wheel and the belt's wrap are outlined with `glEdgeFlag`, so they show their shape rather than every sample (`prim.h`).
+- The rod and ram are darker steel, the gears alternate brass and copper, and the cleats are yellow, so parts that meet do not share a colour.
+- The bulbs glow but light nothing, and the window glass is a pale daylight colour.
+
+**The polished parts have a 45° chamfer** (`prim.h`, `cyl()`), as real stamped
+parts have.
 
 **The Geneva wheel sits at z 0.66–0.74** rather than the PRD's 0.62 centre
 (`config.h`). The near conveyor frame rail also has to fit between the roller
@@ -142,25 +147,14 @@ assumes a point pin, whose centre reaches 0.2278. A pin of radius 0.045 reaches
 **The rail bracket is two arms**, one per guide rail (`scene.h`), so the ram
 passes between them instead of through them.
 
-**Two hanging bulbs replace the press lamp and the fill light** (`config.h`,
-`lighting.h`). The PRD's rig was a spotlight over the die plus a dim point fill,
-and neither fixture was ever on screen. Now `GL_LIGHT0` and `GL_LIGHT1` are two
-identical warm point lights, each drawn as a glass bulb on a flex that glows
-(emission, plus an additive halo) while it is on, each with its own switch.
-They hang either side of the press, 1.0 in front of the belt and 2.4 above it.
-Bulbs out at the side walls were tried first and failed the same test the
-chamfer answers: seen from the belt they sit under 30° up, the half vector
-lands 20° off the chamfer, and no highlight appears. Over the ends of the line,
-a blank passing underneath sees its bulb 50–65° up and catches a highlight on
-its chamfer. What this gives up: the spotlight's cone, and with it the old
-demonstration of a blocky Gouraud pool against a clean Phong ellipse. The
-shader still evaluates a spot cone if one is configured. The global ambient
-rises from 0.10 to 0.20 so the room reads in the corners.
+**Two hanging bulbs** (`config.h`, `room.h`). Each is a glass bulb on a flex,
+drawn with an additive halo while it is on, and each has its own switch. They
+hang either side of the press, 1.0 in front of the belt and 2.4 above it.
 
 **A switch panel and a minimal HUD** (`main.cpp`, `room.h`). The machine, each
 bulb and the fan have their own switch, drawn as rockers with status lamps on
 the electrical cabinet, in the same colours as the HUD's dots. The HUD is one
-small panel (switches, speed, parts, shading) and a key hint; the full technical
+small panel (switches, speed, parts) and a key hint; the full technical
 readout the demonstrations above refer to is behind `h`.
 
 **There is a room** (`room.h`). The PRD says "no factory building". The line
@@ -181,10 +175,9 @@ depth step there is 0.0004, so the hazard marks, 0.004 above the floor, stay
 about ten steps clear. It moves at speed × `dt` from held keys, not on key
 repeat, so it stays frame-rate independent like the machine. Walls hide the
 same way as in the presets: fly out through a wall and it disappears.
-- The **floor grows** to the room at the same 0.25 cell (60 × 32).
-- **Eight room materials** are added (wall paint, safety yellow, wood, signal
-  red, galvanized steel, emissive window glass, and a bulb lit and unlit); the
-  machine's six are unchanged.
+- The **floor grows** to the room, in 1.0 tiles (15 × 8).
+- **Eight room colours** are added (wall paint, safety yellow, wood, signal
+  red, galvanized steel, window glass, and a bulb lit and unlit).
 - The **parts counter** is closed-form in `theta` and `cycles` and reads
   `kin::parts_made()`, the same function the HUD uses. The **fan** is not: with
   its own switch it keeps its own speed and angle, and closes on its target
@@ -218,11 +211,9 @@ plane, so this is composition, not collision.
 | `src/config.h` | every tunable number, PRD-section referenced |
 | `src/kinematics.h` | all closed-form motion — no OpenGL, shared with the test |
 | `src/prim.h` | the one box routine and one cylinder routine |
-| `src/materials.h` | the six machine materials and eight for the room |
-| `src/shaders.h` | the GLSL 1.10 Phong vertex and fragment shaders |
-| `src/lighting.h` | the two bulbs, their switches, and the shading-mode switch |
+| `src/materials.h` | one flat colour per material, for the machine and the room |
 | `src/scene.h` | display lists and the per-frame hierarchy |
 | `src/room.h` | the cutaway workshop: walls, ceiling, bulbs and glow, cabinet switches, fan, counter |
-| `src/main.cpp` | GLUT glue, state and switches, input, HUD |
+| `src/main.cpp` | GLUT glue, state and switches, input, HUD, the fill and edge passes |
 | `tests/mathcheck.cpp` | headless verification of PRD §10 |
 | `PRD.md` | the requirements document this implements |

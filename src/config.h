@@ -84,11 +84,15 @@ constexpr float BRACKET_Y0 = 3.60f, BRACKET_Y1 = 3.76f; // under G2's tip, 3.80
 // ---- Drive panel, floor, motor (PRD 4.2) -----------------------------------
 constexpr float PANEL_CX = 3.2f, PANEL_CY = 2.75f, PANEL_CZ = -1.0f;
 constexpr float PANEL_W = 5.2f, PANEL_H = 5.5f, PANEL_D = 0.10f;
-constexpr int   PANEL_NX = 26, PANEL_NY = 22;  // subdivided: lit per vertex
-// The floor fills the room (see ROOM_* below) at the original 0.25 cell.
+// One cell: the edge pass outlines every cell, and a grid behind the gears
+// would read as graph paper.
+constexpr int   PANEL_NX = 1, PANEL_NY = 1;
+// The floor fills the room (see ROOM_* below) in 1.0 tiles.  Their outlines
+// are the one grid kept on purpose: with every face a flat colour, the tiles
+// are what shows the floor receding in perspective.
 constexpr float FLOOR_X0 = -6.0f, FLOOR_X1 = 9.0f;
 constexpr float FLOOR_Z0 = -2.5f, FLOOR_Z1 = 5.5f;
-constexpr int   FLOOR_NX = 60, FLOOR_NZ = 32;
+constexpr int   FLOOR_NX = 15, FLOOR_NZ = 8;
 constexpr float MOTOR_R = 0.35f, MOTOR_Z0 = -1.75f, MOTOR_Z1 = -0.95f;
 constexpr float MOTOR_SHAFT_R = 0.08f;
 
@@ -102,7 +106,8 @@ constexpr float BELT_TOP_Y = 3.00f;   // 2.59 + 0.39 + 0.02
 constexpr int   ROLL_PITCHES = 10;    // roller centres are exactly 10p apart
 constexpr int   CLEAT_N = 24;         // loop is 2D + 2*pi*R_c = 24p
 constexpr float CLEAT_W = 0.03f, CLEAT_H = 0.03f, CLEAT_LEN = 0.96f;
-constexpr int   BELT_TOP_SEGS = 40;   // subdivided: lit per vertex
+constexpr int   BELT_TOP_SEGS = 1;    // outlined cells would be stripes that
+                                      // stand still while the cleats move
 constexpr int   SHELL_SEGS = 24;
 constexpr float CFRAME_Z  = 0.55f;    // side frame rail centre plane
 constexpr float CFRAME_W  = 0.08f, CFRAME_H = 0.20f, CFRAME_LEN = 6.70f;
@@ -111,10 +116,8 @@ constexpr float LEG_X0 = -2.00f, LEG_X1 = 3.70f, LEG_W = 0.12f;
 
 // ---- Blanks (PRD FR-6, FR-7) -----------------------------------------------
 constexpr float BLANK_R = 0.18f, BLANK_H = 0.20f, BLANK_H_FLAT = 0.10f;
-constexpr int   BLANK_SLICES = 14;    // deliberately coarse: FR-12 acceptance
-// A broken edge on the polished parts.  Without it nothing in the scene faces
-// the half vector and the mandatory specular highlight does not exist at all -
-// the reasoning is in prim.h, above cyl().
+constexpr int   BLANK_SLICES = 14;
+// A broken 45-degree edge on the polished parts, as real stamped parts have.
 constexpr float BLANK_CHAMFER = 0.030f;
 constexpr float PART_CHAMFER  = 0.025f;   // rollers, crank disc, pins, shafts
 constexpr int   PRESS_STATION = 7;    // furthest upstream station the
@@ -184,21 +187,13 @@ constexpr float STACK_POST_R = 0.05f, STACK_POST_H = 5.50f;
 constexpr float STACK_R = 0.10f, STACK_SEG_H = 0.25f;
 constexpr float STACK_Y0 = 5.55f;     // green, amber, red upward
 
-// ---- Lighting: two hanging bulbs (replaces PRD FR-10's rig; see README) ----
-// Two point lights, one each side of the press and mirrored about it, each
-// drawn as the bulb that gives it off and each on its own switch.  They hang
-// 1.0 in front of the belt and 2.4 above it, which does two jobs:
-//  - both stay inside the default frame, clear of the HUD and the gear train;
-//  - a blank passing under a bulb sees it 50 to 65 degrees up, so the half
-//    vector to the camera lands within a few degrees of the blank's 45-degree
-//    chamfer and the specular highlight appears, then slides off as it moves.
-// Bulbs out at the side walls were tried first: seen from the belt they sit
-// under 30 degrees up, and no surface in the scene faced the half vector.
-constexpr float BULB_X[2] = { -0.57f, 4.80f };     // light 0 left, light 1 right
+// ---- Two hanging bulbs -----------------------------------------------------
+// One each side of the press, 1.0 in front of the belt and 2.4 above it, each
+// on its own switch.  Both stay inside the default frame, clear of the HUD and
+// the gear train.  In this build they are fixtures: a lit bulb glows, and
+// lights nothing.
+constexpr float BULB_X[2] = { -0.57f, 4.80f };     // left, right
 constexpr float BULB_Y = 5.40f, BULB_Z = 1.00f;    // centre of the glass
-// The slides' radial formula 1/(a0 + a1 d + a2 d^2) stays in play: about 0.9
-// on the blanks under a bulb, 2.5 away, and under 0.5 in the room's far corners.
-constexpr float BULB_A0 = 1.0f, BULB_A1 = 0.03f, BULB_A2 = 0.008f;
 constexpr float BULB_R = 0.12f;       // glass globe
 constexpr float GLOW_R = 0.45f;       // additive halo round a lit bulb
 
@@ -211,10 +206,10 @@ constexpr float GLOW_R = 0.45f;       // additive halo round a lit bulb
 constexpr float ROOM_X0 = -6.0f, ROOM_X1 = 9.0f;   // = the floor
 constexpr float ROOM_Z0 = -2.5f, ROOM_Z1 = 5.5f;
 constexpr float CEIL_Y  = 9.5f;
-constexpr float WALL_CELL = 0.5f;     // walls and ceiling are lit per vertex too
+constexpr float WALL_CELL = 1.0f;     // outlined: reads as wall panels
 constexpr float DADO_H = 1.20f, TRIM_H = 0.06f;    // concrete plinth band
 
-// Windows: y is the sill.  The glass glows (emission) and lights nothing.
+// Windows: y is the sill.  The glass is a pale daylight colour.
 constexpr float WIN_Y0 = 5.20f, WIN_H = 1.80f, WIN_W = 1.80f;
 constexpr float WIN_FRAME = 0.08f, WIN_DEPTH = 0.10f, WIN_BAR = 0.05f;
 

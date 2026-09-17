@@ -33,11 +33,12 @@ using namespace cfg;
 using namespace prim;
 using kin::LAY;
 
-// PRD FR-11's six materials.  Each is a compile-time constant, so baking one
-// into a display list is correct; the stack light's emission is the only
-// material in the scene that changes at runtime and it is set outside its list.
+// Flat colours (materials.h).  Each is a compile-time constant, so baking one
+// into a display list is correct; the stack light's colour is the only one in
+// the machine that changes at runtime, and it is set outside its list.
 inline void c_brass()   { mat::use(mat::BRASS);         }
 inline void c_silver()  { mat::use(mat::SILVER);        }
+inline void c_steel()   { mat::use(mat::DARK_STEEL);    }
 inline void c_plastic() { mat::use(mat::BLACK_PLASTIC); }
 inline void c_paint()   { mat::use(mat::MACHINE_PAINT); }
 inline void c_rubber()  { mat::use(mat::RUBBER);        }
@@ -306,9 +307,11 @@ inline void build_lists() {
 // ---------------------------------------------------------------------------
 // Per-frame drawing.  Everything below is a pure function of (theta, cycles).
 // ---------------------------------------------------------------------------
+// Brass and copper alternate along the train (G1-G2, G2-G3, G3-G4, G4-G5), so
+// the two gears at every mesh are different colours.
 inline void draw_gears(const float* phi) {
-    c_brass();
     for (int i = 0; i < 5; ++i) {
+        mat::use(i == 1 || i == 3 ? mat::COPPER : mat::BRASS);
         glPushMatrix();
         glTranslatef(LAY.g[i].cx, LAY.g[i].cy, GEAR_Z);
         glRotatef(phi[i] * DEG, 0, 0, 1);
@@ -355,6 +358,7 @@ inline void draw_press(float th, float sn, float cs) {
     // connecting rod - placed from both of its endpoints, which is a composite
     // transformation in its own right.  Its length is exactly ROD_L because
     // that is what s(theta) solves for.
+    c_steel();
     glPushMatrix();
     glTranslatef(px, py, 0.0f);
     glRotatef(atan2f(s - py, PRESS_X - px) * DEG, 0, 0, 1);
@@ -362,11 +366,13 @@ inline void draw_press(float th, float sn, float cs) {
     box(ROD_L, ROD_W, ROD_D);
     glPopMatrix();
 
+    c_silver();
     glPushMatrix();                                  // wrist pin
     glTranslatef(PRESS_X, s, -0.06f);
     cyl_z(0.06f, 0.12f, 12, 0.015f);
     glPopMatrix();
 
+    c_steel();
     glPushMatrix();                                  // ram and punch
     glTranslatef(PRESS_X, s - 0.5f * RAM_H, 0.0f);
     box(RAM_W, RAM_H, RAM_D);
@@ -419,7 +425,7 @@ inline void draw_conveyor(float B) {
     glCallList(L(L_GENEVA));
     glPopMatrix();
 
-    c_rubber();                                      // 24 cleats on the loop
+    mat::use(mat::SAFETY_YELLOW);                    // 24 cleats on the loop
     for (int k = 0; k < CLEAT_N; ++k) {
         const kin::PathPt q = kin::belt_path(kin::cleat_s(k, B));
         glPushMatrix();
@@ -486,12 +492,11 @@ inline void draw_stack_light(kin::Phase ph) {
 
     // green: APPROACH and RETREAT.  amber: INDEX.  red: STAMP.
     //
-    // The lit lens carries a GL_EMISSION matching its colour and the unlit two
-    // a dim one, which is the + I_e term of the slides' illumination equation
-    // doing real work.  The emission changes every frame, so it is set OUTSIDE
-    // the display list, immediately before calling it: a list captures the
-    // values passed to glMaterialfv when it was compiled, not a reference to
-    // them, so an emission baked into the list could never change (PRD FR-15).
+    // The lit lens is drawn in its full colour and the other two dimmed.  The
+    // colour changes with the phase, so it is set OUTSIDE the display list,
+    // immediately before calling it: a list captures the values passed to
+    // glColor when it was compiled, not a reference to them, so a colour baked
+    // into the list could never change (PRD FR-15).
     const int lit = (ph == kin::PH_STAMP) ? 2 : (ph == kin::PH_INDEX ? 1 : 0);
     const float base[3][3] = {{0.10f, 0.85f, 0.20f},
                               {0.95f, 0.65f, 0.05f},
@@ -503,8 +508,6 @@ inline void draw_stack_light(kin::Phase ph) {
         glCallList(L(L_STACK_SEG));
         glPopMatrix();
     }
-    // Leave no emission behind for whatever is drawn next.
-    glMaterialfv(GL_FRONT, GL_EMISSION, mat::NO_EMISSION);
 }
 
 inline void draw(float th, long cycles) {
@@ -515,8 +518,8 @@ inline void draw(float th, long cycles) {
     const float sn = sinf(th), cs = cosf(th);        // hoisted, FR-15
 
     // Static geometry.  Each list carries its own colour, which is safe because
-    // none of these change at runtime; FR-11's stack-light emission is the one
-    // material that does, and it is set outside its list below.
+    // none of these change at runtime; the stack light's is the one that does,
+    // and it is set outside its list below.
     glCallList(L(L_FLOOR));
     glCallList(L(L_PANEL));
     glCallList(L(L_CONVEYOR));
