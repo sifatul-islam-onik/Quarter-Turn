@@ -1,4 +1,5 @@
-// lighting.h - PRD FR-10 (the two-light rig) and FR-12 (three shading modes).
+// lighting.h - the two hanging bulbs (replacing PRD FR-10's rig) and FR-12
+// (three shading modes).
 #ifndef LIGHTING_H
 #define LIGHTING_H
 
@@ -28,55 +29,46 @@ inline char   g_shader_error[512] = { 0 };
 // Light colours.  Kept here rather than in config.h because they are GLfloat
 // arrays; every scalar they depend on is in config.h.
 // ---------------------------------------------------------------------------
-// Light 0, the press lamp.  Warm white, and its ambient is deliberately zero:
-// a spotlight that contributed ambient would defeat its own cone.
-constexpr GLfloat L0_AMBIENT[4]  = { 0.00f, 0.00f, 0.00f, 1.0f };
-constexpr GLfloat L0_DIFFUSE[4]  = { 1.00f, 0.96f, 0.88f, 1.0f };
-constexpr GLfloat L0_SPECULAR[4] = { 1.00f, 1.00f, 1.00f, 1.0f };
-
-// Light 1, the fill.  Low and cool, so it reads as a different light rather
-// than as more of the same one.
-constexpr GLfloat L1_AMBIENT[4]  = { 0.05f, 0.05f, 0.06f, 1.0f };
-constexpr GLfloat L1_DIFFUSE[4]  = { 0.25f, 0.26f, 0.30f, 1.0f };
-constexpr GLfloat L1_SPECULAR[4] = { 0.15f, 0.15f, 0.18f, 1.0f };
+// Both bulbs are the same warm white, GL_LIGHT0 on the left and GL_LIGHT1 on
+// the right.  Each carries a little ambient of its own, so switching both off
+// visibly darkens the room instead of only removing the direct light.
+constexpr GLfloat BULB_AMBIENT[4]  = { 0.08f, 0.07f, 0.06f, 1.0f };
+constexpr GLfloat BULB_DIFFUSE[4]  = { 1.00f, 0.93f, 0.80f, 1.0f };
+constexpr GLfloat BULB_SPECULAR[4] = { 1.00f, 0.97f, 0.90f, 1.0f };
 
 constexpr GLfloat BLACK[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-constexpr GLfloat MODEL_AMBIENT[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
+// Global ambient.  Raised from 0.10 with the bulbs, so a room lit only by
+// point lights still reads in the corners they barely reach.
+constexpr GLfloat MODEL_AMBIENT[4] = { 0.20f, 0.20f, 0.22f, 1.0f };
+
+inline GLenum light_id(int i) { return (GLenum)(GL_LIGHT0 + i); }
 
 // ---------------------------------------------------------------------------
-// The fill-light toggle has to switch the light OFF for both pipelines, and
-// they do not agree by default: GLSL 1.10 gives a shader no way to ask whether
-// a light is enabled, so glDisable(GL_LIGHT1) alone would leave Phong mode
-// still summing it.  Zeroing the colours as well makes the light contribute
-// nothing in either pipeline, which keeps FR-12's "both modes read the same
-// state" claim true through the toggle.
+// A bulb switch has to turn the light OFF for both pipelines, and they do not
+// agree by default: GLSL 1.10 gives a shader no way to ask whether a light is
+// enabled, so glDisable alone would leave Phong mode still summing it.
+// Zeroing the colours as well makes the light contribute nothing in either
+// pipeline, which keeps FR-12's "both modes read the same state" claim true.
 // ---------------------------------------------------------------------------
-inline void set_fill(bool on) {
-    glLightfv(GL_LIGHT1, GL_AMBIENT,  on ? L1_AMBIENT  : BLACK);
-    glLightfv(GL_LIGHT1, GL_DIFFUSE,  on ? L1_DIFFUSE  : BLACK);
-    glLightfv(GL_LIGHT1, GL_SPECULAR, on ? L1_SPECULAR : BLACK);
-    if (on) glEnable(GL_LIGHT1); else glDisable(GL_LIGHT1);
+inline void set_bulb(int i, bool on) {
+    const GLenum l = light_id(i);
+    glLightfv(l, GL_AMBIENT,  on ? BULB_AMBIENT  : BLACK);
+    glLightfv(l, GL_DIFFUSE,  on ? BULB_DIFFUSE  : BLACK);
+    glLightfv(l, GL_SPECULAR, on ? BULB_SPECULAR : BLACK);
+    if (on) glEnable(l); else glDisable(l);
 }
 
 // Everything about the lights that does not change per frame.
 inline void init_lights() {
     glEnable(GL_LIGHTING);
-    glEnable(GL_LIGHT0);
-
-    glLightfv(GL_LIGHT0, GL_AMBIENT,  L0_AMBIENT);
-    glLightfv(GL_LIGHT0, GL_DIFFUSE,  L0_DIFFUSE);
-    glLightfv(GL_LIGHT0, GL_SPECULAR, L0_SPECULAR);
-    glLightf (GL_LIGHT0, GL_SPOT_CUTOFF,           SPOT_CUTOFF);
-    glLightf (GL_LIGHT0, GL_SPOT_EXPONENT,         SPOT_EXPONENT);
-    glLightf (GL_LIGHT0, GL_CONSTANT_ATTENUATION,  SPOT_A0);
-    glLightf (GL_LIGHT0, GL_LINEAR_ATTENUATION,    SPOT_A1);
-    glLightf (GL_LIGHT0, GL_QUADRATIC_ATTENUATION, SPOT_A2);
-
-    glLightf (GL_LIGHT1, GL_SPOT_CUTOFF,           180.0f);  // a point light
-    glLightf (GL_LIGHT1, GL_CONSTANT_ATTENUATION,  FILL_A0);
-    glLightf (GL_LIGHT1, GL_LINEAR_ATTENUATION,    FILL_A1);
-    glLightf (GL_LIGHT1, GL_QUADRATIC_ATTENUATION, FILL_A2);
-    set_fill(true);
+    for (int i = 0; i < 2; ++i) {
+        const GLenum l = light_id(i);
+        glLightf(l, GL_SPOT_CUTOFF,           180.0f);   // a point light
+        glLightf(l, GL_CONSTANT_ATTENUATION,  BULB_A0);
+        glLightf(l, GL_LINEAR_ATTENUATION,    BULB_A1);
+        glLightf(l, GL_QUADRATIC_ATTENUATION, BULB_A2);
+        set_bulb(i, true);
+    }
 
     glLightModelfv(GL_LIGHT_MODEL_AMBIENT, MODEL_AMBIENT);
     // GL_FALSE, the default, does not merely dim highlights: it substitutes a
@@ -93,11 +85,10 @@ inline void init_lights() {
 // the camera transform and before any model transform.
 //
 // glLightfv(..., GL_POSITION, ...) transforms the position by the current
-// modelview matrix, and glLightfv(..., GL_SPOT_DIRECTION, ...) transforms the
-// direction by its upper-left 3x3.  Getting this wrong produces lights that
-// swim with the objects - the single most common fixed-function lighting bug.
-// Getting the position right but forgetting the direction produces a spotlight
-// whose cone points somewhere else: the same bug wearing a different hat.
+// modelview matrix.  Getting this wrong produces lights that swim with the
+// objects - the single most common fixed-function lighting bug.  Here it
+// would show at once: each bulb's glow is drawn at the same world position,
+// so a misplaced light would visibly leave its bulb behind.
 //
 // The fourth component is given as 1.0 explicitly.  A w of 0.0 silently makes
 // the light directional, which discards both the position and the attenuation,
@@ -105,13 +96,10 @@ inline void init_lights() {
 // unnoticed for an hour.
 // ---------------------------------------------------------------------------
 inline void place_lights() {
-    const GLfloat pos0[4] = { SPOT_X, SPOT_Y, SPOT_Z, 1.0f };
-    const GLfloat dir0[3] = { AIM_X - SPOT_X, AIM_Y - SPOT_Y, AIM_Z - SPOT_Z };
-    glLightfv(GL_LIGHT0, GL_POSITION,       pos0);
-    glLightfv(GL_LIGHT0, GL_SPOT_DIRECTION, dir0);
-
-    const GLfloat pos1[4] = { FILL_X, FILL_Y, FILL_Z, 1.0f };
-    glLightfv(GL_LIGHT1, GL_POSITION, pos1);
+    for (int i = 0; i < 2; ++i) {
+        const GLfloat pos[4] = { BULB_X[i], BULB_Y, BULB_Z, 1.0f };
+        glLightfv(light_id(i), GL_POSITION, pos);
+    }
 }
 
 // ---------------------------------------------------------------------------

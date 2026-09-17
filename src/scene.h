@@ -213,8 +213,8 @@ inline void build_lists() {
         box_span(mx - i, MAG_Y0, -o, mx + i, MAG_Y1, -i);
         box_span(mx - i, MAG_Y0,  i, mx + i, MAG_Y1,  o);
     }
-    {   // exit hood: top, two sides resting on the belt edges, and a closed
-        // downstream end, so a finished part is hidden before it is removed
+    {   // exit hood: a top and two sides resting on the belt edges.  The far
+        // end is open, so a finished part can leave over the head roller
         box_span(HOOD_X0, HOOD_Y0, -HOOD_Z_OUT,
                  HOOD_X1, HOOD_Y0 + HOOD_TOP_T, HOOD_Z_OUT);
         for (int s = -1; s <= 1; s += 2) {
@@ -222,8 +222,6 @@ inline void build_lists() {
             const float z1 = s > 0 ? HOOD_Z_OUT : -HOOD_Z_IN;
             box_span(HOOD_X0, BELT_TOP_Y, z0, HOOD_X1, HOOD_Y0, z1);
         }
-        box_span(HOOD_X1 - MAG_WALL, BELT_TOP_Y, -HOOD_Z_IN,
-                 HOOD_X1,            HOOD_Y0,     HOOD_Z_IN);
     }
     c_paint();
     {   // chute down to the bin
@@ -434,23 +432,44 @@ inline void draw_conveyor(float B) {
 
 // The scene's only glScalef (PRD 4.3).  Applied about the blank's base, so a
 // flattened part stays on the belt instead of being lifted off it; scaling
-// about the centre would do the opposite.
-inline void draw_blank(float x, float y, float h) {
+// about the centre would do the opposite.  (x, y, z) is the base centre.
+inline void draw_blank(float x, float y, float h, float z = 0.0f) {
     const float q = kin::squash_q(h);
     glPushMatrix();
-    glTranslatef(x, y, 0.0f);
+    glTranslatef(x, y, z);
     glScalef(1.0f / sqrtf(q), q, 1.0f / sqrtf(q));
     glCallList(L(L_BLANK));
     glPopMatrix();
 }
 
-inline void draw_blanks(float th, float g) {
+// A finished part in flight or in the bin: turned about its own centre, then
+// drawn through the same squash as every other blank.
+inline void draw_part(const kin::PartPose& p) {
+    const float hh = 0.5f * BLANK_H_FLAT;
+    glPushMatrix();
+    glTranslatef(p.x, p.y, p.z);
+    glRotatef(p.tilt_deg, 0, 0, 1);
+    draw_blank(0.0f, -hh, BLANK_H_FLAT);
+    glPopMatrix();
+}
+
+inline void draw_blanks(float th, long cycles, float g) {
     c_silver();
     const float p = kin::pitch(), xt = kin::tail_x();
     for (int j = 1; j <= LABELS; ++j)
         draw_blank(xt + (j + g) * p, BELT_TOP_Y, kin::blank_h(j, th));
     if (kin::phase_of(th) == kin::PH_INDEX && kin::fresh_visible(g))
         draw_blank(kin::station_x(1), kin::fresh_blank_y(g), BLANK_H);
+
+    // Finished parts: at most one on the head roller and one on its way down,
+    // then the pile in the bin.
+    const kin::Clock c = kin::stroke_clock(th, cycles);
+    kin::PartPose pose;
+    for (long e = c.n - 1; e <= c.n; ++e)
+        if (kin::exit_pose(e, c, g, &pose)) draw_part(pose);
+    long piled = kin::bin_count(c);
+    if (piled > kin::bin_capacity()) piled = kin::bin_capacity();
+    for (int i = 0; i < (int)piled; ++i) draw_part(kin::bin_slot(i));
 }
 
 inline void draw_stack_light(kin::Phase ph) {
@@ -509,7 +528,7 @@ inline void draw(float th, long cycles) {
     draw_press(th, sn, cs);
     draw_geneva_driver(phi);
     draw_conveyor(B);
-    draw_blanks(th, g);
+    draw_blanks(th, cycles, g);
     draw_stack_light(kin::phase_of(th));
 }
 

@@ -321,6 +321,133 @@ int main() {
            "that is two radii plus a 0.02 gap");
     }
 
+    printf("\n-- exit and bin --------------------------------------------\n");
+    {
+        const float r = flat_r(), hh = 0.5f * BLANK_H_FLAT;
+        printf("  flat radius %.4f  chute %.4f long, part on it from %.3f to %.3f\n",
+               r, chute_len(), chute_land(), chute_leave());
+
+        // Run the crank from the reset state in 0.02 deg steps for 8
+        // revolutions, exactly as update() advances it, and follow part 3.
+        const float step = 0.02f * RAD;
+        float th = RESET_THETA_DEG * RAD;
+        long cyc = 0;
+        Clock c0 = stroke_clock(th, cyc);
+        float clock_err = 0.0f, pose_jump = 0.0f, gap = 1e9f;
+        long prev_count = bin_count(c0), count_steps = 0;
+        bool count_by_one = true, seen = false, on_prev = false;
+        bool gapped = false, landed_on_slot = false;
+        PartPose prev = { 0.0f, 0.0f, 0.0f, 0.0f };
+        const int steps = (int)(8.0f * 360.0f / 0.02f);
+        for (int i = 0; i < steps; ++i) {
+            th += step;
+            while (th >= 2.0f * PI) { th -= 2.0f * PI; ++cyc; }
+            const Clock c = stroke_clock(th, cyc);
+            const float jump = (float)(c.n - c0.n) + (c.f - c0.f);
+            clock_err = fmaxf(clock_err, fabsf(jump - step / (2.0f * PI)));
+            c0 = c;
+
+            const long n = bin_count(c);
+            if (n != prev_count) {
+                if (n != prev_count + 1) count_by_one = false;
+                ++count_steps;
+                prev_count = n;
+            }
+
+            const float g = index_progress(th);
+            PartPose q;
+            const bool on = exit_pose(3, c, g, &q);
+            if (on && on_prev) {
+                pose_jump = fmaxf(pose_jump, hypotf(q.x - prev.x, q.y - prev.y));
+                pose_jump = fmaxf(pose_jump, fabsf(q.z - prev.z));
+            }
+            if (on && !on_prev && seen) gapped = true;
+            if (!on && on_prev) {                        // it has just landed
+                const PartPose s = bin_slot(2);
+                landed_on_slot = hypotf(prev.x - s.x, prev.y - s.y) < 5e-3f
+                              && fabsf(prev.z - s.z) < 5e-3f;
+            }
+            if (on) seen = true;
+
+            // While part 3 rides its index, the next blank follows it along
+            // the belt.  Their outlines must never meet.
+            if (on && c.n == 3 && c.f >= index_start_f()) {
+                const float ta = q.tilt_deg * RAD;
+                const float hx = r * fabsf(cosf(ta)) + hh * fabsf(sinf(ta));
+                const float hy = r * fabsf(sinf(ta)) + hh * fabsf(cosf(ta));
+                const float next_right = station_x(9) + g * pitch() + r;
+                if (q.y - hy < BELT_TOP_Y + BLANK_H_FLAT)
+                    gap = fminf(gap, (q.x - hx) - next_right);
+            }
+            on_prev = on;
+            if (on) prev = q;
+        }
+        printf("  clock error per step %.2e   largest step of a part %.4f\n",
+               clock_err, pose_jump);
+        ck(clock_err < 1e-4f, "stroke clock is continuous, 1 per revolution");
+        ck(seen && !gapped && pose_jump < 0.01f,
+           "a finished part's path is continuous, arrival to landing");
+        ck(landed_on_slot, "a part lands exactly on its slot in the bin");
+        // From reset the clock reads 0.125, and part e lands at e + 1.52.
+        const long want = (long)floorf(
+            8.0f + (RESET_THETA_DEG - engage_half() * DEG) / 360.0f - exit_land_t());
+        printf("  bin count rose %ld times over 8 revolutions (want %ld)\n",
+               count_steps, want);
+        ck(count_by_one && count_steps == want,
+           "parts land one at a time, one per revolution");
+        printf("  departing part to the blank behind it, closest %.4f\n", gap);
+        ck(gap > 0.05f, "a departing part stays clear of the blank behind it");
+
+        {   // it arrives exactly where the belt's last blank stops
+            PartPose q;
+            const Clock c = { 5, 0.0f };
+            const bool on = exit_pose(5, c, 0.0f, &q);
+            ck(on && near(q.x, station_x(10), 1e-4f)
+                  && near(q.y, BELT_TOP_Y + hh, 1e-4f) && q.tilt_deg == 0.0f,
+               "a part arrives where the belt's last blank stops");
+        }
+
+        // Every drop, to every slot, stays inside the bin's walls whenever any
+        // of the part is below the rim.  The part is bounded by its tilted box.
+        float worst = 1e9f;
+        for (int slot = 0; slot < bin_capacity(); ++slot)
+            for (int k = 0; k <= 200; ++k) {
+                const long e = slot + 1;
+                const Clock c = { e + 1, EXIT_SLIDE + EXIT_DROP * 0.9999f * k / 200.0f };
+                PartPose q;
+                if (!exit_pose(e, c, 0.0f, &q)) continue;
+                const float ta = q.tilt_deg * RAD;
+                const float hx = r * fabsf(cosf(ta)) + hh * fabsf(sinf(ta));
+                const float hy = r * fabsf(sinf(ta)) + hh * fabsf(cosf(ta));
+                if (q.y - hy >= BIN_H) continue;
+                worst = fminf(worst, (q.x - hx) - (BIN_X0 + BIN_WALL));
+                worst = fminf(worst, (BIN_X1 - BIN_WALL) - (q.x + hx));
+                worst = fminf(worst, (BIN_Z - BIN_WALL) - (fabsf(q.z) + r));
+            }
+        printf("  closest a falling part comes to a bin wall %.4f\n", worst);
+        ck(worst > 0.0f, "every drop stays inside the bin below the rim");
+
+        // The full pile fits: clear of the walls and of each other, and its
+        // top below the rim.
+        float wall = 1e9f, apart = 1e9f;
+        for (int i = 0; i < bin_capacity(); ++i) {
+            const PartPose a = bin_slot(i);
+            wall = fminf(wall, (a.x - r) - (BIN_X0 + BIN_WALL));
+            wall = fminf(wall, (BIN_X1 - BIN_WALL) - (a.x + r));
+            wall = fminf(wall, (BIN_Z - BIN_WALL) - (fabsf(a.z) + r));
+            for (int j = 0; j < bin_capacity(); ++j) {
+                const PartPose b = bin_slot(j);
+                if (i == j || fabsf(a.y - b.y) > 1e-4f) continue;
+                apart = fminf(apart, hypotf(a.x - b.x, a.z - b.z) - 2.0f * r);
+            }
+        }
+        const float top = bin_slot(bin_capacity() - 1).y + hh;
+        printf("  full pile of %d: wall margin %.4f, gap %.4f, top %.3f\n",
+               bin_capacity(), wall, apart, top);
+        ck(wall > 0.0f && apart > 0.0f && top <= BIN_H,
+           "the full pile fits the bin, below the rim");
+    }
+
     printf("\n-- speed ---------------------------------------------------\n");
     printf("  at 60 fps: %.2f teeth/frame at 30 ppm, %.2f at 100, %.2f at 120\n",
            0.6f * 30.0f / 60.0f, 0.6f * 100.0f / 60.0f, 0.6f * 120.0f / 60.0f);

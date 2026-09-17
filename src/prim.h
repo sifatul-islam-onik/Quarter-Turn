@@ -59,13 +59,15 @@ inline void box_span(float x0, float y0, float z0,
 // `chamfer` breaks both end edges at 45 degrees, and it is not decoration.
 // Every other normal in this scene lies in an axis plane - boxes face along
 // +/-x, +/-y, +/-z, and a cylinder's wall normals stay in the plane normal to
-// its axis.  The half vector between the press lamp (69 degrees above the die)
-// and the default camera (16 degrees above the belt) sits at about 43 degrees,
-// so NO surface in the scene faced it and the mandatory specular highlight
-// evaluated to about 1e-12 everywhere at ns 89.6.  A 45-degree chamfer supplies
-// normals at every azimuth on a 45-degree cone, which contains the half vector
-// to within about 1.5 degrees - and that is the whole difference between a
-// blazing highlight and none at all.  Real stamped parts have a broken edge
+// its axis.  With the original press lamp 69 degrees above the die and the
+// default camera 16 degrees above the belt, the half vector sat at about 43
+// degrees, so NO surface in the scene faced it and the mandatory specular
+// highlight evaluated to about 1e-12 everywhere at ns 89.6.  A 45-degree
+// chamfer supplies normals at every azimuth on a 45-degree cone, which
+// contained that half vector to within about 1.5 degrees - the whole
+// difference between a blazing highlight and none at all.  The hanging bulbs
+// that replaced the lamp still rely on it: a blank catches a highlight on its
+// chamfer as it passes under a bulb.  Real stamped parts have a broken edge
 // anyway, so this costs nothing in honesty.
 // ---------------------------------------------------------------------------
 inline void cyl(float r, float h, int slices, float chamfer = 0.0f) {
@@ -138,10 +140,10 @@ inline void cyl_z(float r, float h, int slices, float chamfer = 0.0f) {
 }
 
 // ---------------------------------------------------------------------------
-// Subdivided surfaces.  In fixed-function mode the spotlight cone is evaluated
-// per vertex, so the surfaces it falls on must be subdivided or its edge is
-// invisible.  These are the only places the project deliberately spends
-// triangles (PRD FR-10).
+// Subdivided surfaces.  In fixed-function mode lighting is evaluated per
+// vertex, so a large surface near a light must be subdivided or the falloff
+// across it is lost to interpolation between four corners.  These are the
+// only places the project deliberately spends triangles (PRD FR-10).
 // ---------------------------------------------------------------------------
 
 // Flat grid in the XZ plane, facing +Y.
@@ -215,6 +217,62 @@ inline void slab_x(float x0, float x1, float y0, float y1,
     glNormal3f(-1,0, 0);
     glVertex3f(x0, y0, z0); glVertex3f(x0, y0, z1); glVertex3f(x0, y1, z1); glVertex3f(x0, y1, z0);
     glEnd();
+}
+
+// Rectangle from corner o along edges u and v, split nu by nv, facing u x v.
+// The room's walls and ceiling: the bulbs are evaluated per vertex, so a wall
+// drawn as a single quad would light as one flat colour.
+inline void grid(float ox, float oy, float oz,
+                 float ux, float uy, float uz,
+                 float vx, float vy, float vz, int nu, int nv) {
+    const float nx = uy * vz - uz * vy;
+    const float ny = uz * vx - ux * vz;
+    const float nz = ux * vy - uy * vx;
+    const float len = sqrtf(nx * nx + ny * ny + nz * nz);
+    glNormal3f(nx / len, ny / len, nz / len);
+    for (int i = 0; i < nu; ++i) {
+        const float a = (float)i / nu, b = (float)(i + 1) / nu;
+        glBegin(GL_QUAD_STRIP);
+        for (int j = 0; j <= nv; ++j) {     // i before i+1: the strip faces u x v
+            const float t = (float)j / nv;
+            glVertex3f(ox + a * ux + t * vx, oy + a * uy + t * vy, oz + a * uz + t * vz);
+            glVertex3f(ox + b * ux + t * vx, oy + b * uy + t * vy, oz + b * uz + t * vz);
+        }
+        glEnd();
+    }
+}
+
+// Surface of revolution about +Y.  `p` is the profile as (radius, height),
+// walked bottom to top; a radius of 0 closes the end.  Each vertex normal is
+// the average of its two segments' normals, so the bulb's glass shades as a
+// smooth globe rather than a stack of bands.
+inline void lathe(const V2* p, int n, int slices) {
+    V2 nrm[32];
+    for (int i = 0; i < n; ++i) {
+        float nr = 0.0f, ny = 0.0f;
+        for (int j = i - 1; j <= i; ++j) {          // segments j -> j+1 touching i
+            if (j < 0 || j + 1 >= n) continue;
+            const float dr = p[j + 1].x - p[j].x, dy = p[j + 1].y - p[j].y;
+            const float len = sqrtf(dr * dr + dy * dy);
+            if (len < 1e-7f) continue;
+            nr += dy / len;                         // outward for a walk upward
+            ny -= dr / len;
+        }
+        const float len = sqrtf(nr * nr + ny * ny);
+        nrm[i].x = len > 0.0f ? nr / len : 0.0f;
+        nrm[i].y = len > 0.0f ? ny / len : 1.0f;
+    }
+    for (int i = 0; i + 1 < n; ++i) {
+        glBegin(GL_QUAD_STRIP);                     // lower ring first, as cyl()
+        for (int k = 0; k <= slices; ++k) {
+            const float a = 2.0f * PI * k / slices, cs = cosf(a), sn = sinf(a);
+            glNormal3f(nrm[i].x * cs, nrm[i].y, nrm[i].x * sn);
+            glVertex3f(p[i].x * cs, p[i].y, p[i].x * sn);
+            glNormal3f(nrm[i + 1].x * cs, nrm[i + 1].y, nrm[i + 1].x * sn);
+            glVertex3f(p[i + 1].x * cs, p[i + 1].y, p[i + 1].x * sn);
+        }
+        glEnd();
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -131,6 +131,12 @@ inline Phase phase_of(float th) {
 }
 inline bool belt_locked(Phase p) { return p != PH_INDEX; }
 
+// A part counts as made at bottom dead centre, where the punch flattens it.
+// Shared by the HUD and the counter on the wall, so the two cannot disagree.
+inline long parts_made(float th, long cycles) {
+    return cycles + (th * DEG >= 180.0f ? 1 : 0);
+}
+
 // Fraction of the current index completed, 0 outside INDEX.  The comparison is
 // strict on both sides so that B stays continuous at exactly alpha = +/-45 deg.
 inline float index_progress(float th) {
@@ -230,6 +236,151 @@ inline bool fresh_visible(float g) { return g >= FRESH_G; }
 inline float fresh_blank_y(float g) {
     return MAG_BOTTOM - (MAG_BOTTOM - BELT_TOP_Y)
                         * clampf((g - FRESH_G) / FRESH_SPAN, 0.0f, 1.0f);
+}
+
+// ===========================================================================
+// Exit - finished parts leave over the head roller and pile up in the bin
+// ===========================================================================
+
+// The stroke clock: indices completed (the same I belt_travel uses) plus the
+// fraction of a revolution since the last index ended.  It is continuous,
+// gains exactly 1 per part, and is whole at theta = 45 deg, the moment a part
+// arrives at station 10.  It is kept as a count and a fraction so that a long
+// run never costs the fraction its precision.
+struct Clock { long n; float f; };
+inline Clock stroke_clock(float th, long cycles) {
+    const float E = engage_half() * DEG;
+    long n = (th * DEG < E) ? cycles - 1 : cycles;
+    if (n < 0) n = 0;          // unreachable from the reset state; a guard only
+    float d = th * DEG - E;
+    if (d < 0.0f) d += 360.0f;
+    Clock c = { n, d / 360.0f };
+    return c;
+}
+// Each index fills the last 2E of a stroke, so it starts at f = 0.75.
+inline float index_start_f() { return 1.0f - engage_half() / PI; }
+
+inline float flat_r()    { return BLANK_R / sqrtf(squash_q(BLANK_H_FLAT)); }
+inline float chute_len() { return hypotf(CHUTE_X1 - CHUTE_X0, CHUTE_Y1 - CHUTE_Y0); }
+// A flat part is on the chute from when its upper rim clears the top end to
+// when its lower rim reaches the bottom end.
+inline float chute_land()  { return flat_r() / chute_len(); }        // 0.2
+inline float chute_leave() { return 1.0f - chute_land(); }           // 0.8
+inline float exit_land_t() { return 1.0f + EXIT_SLIDE + EXIT_DROP; } // 1.52
+inline int   bin_capacity() { return BIN_COLS * BIN_COLS * BIN_LEVELS; }
+
+// A part's centre and its tilt about z, glRotatef degrees; 0 is lying flat.
+struct PartPose { float x, y, z, tilt_deg; };
+
+// A flat part lying on the chute, fraction u of the way down it.
+inline PartPose chute_pose(float u) {
+    const float L  = chute_len();
+    const float nx = -(CHUTE_Y1 - CHUTE_Y0) / L;       // out of the chute's
+    const float ny =  (CHUTE_X1 - CHUTE_X0) / L;       // top face
+    const float off = 0.5f * (CHUTE_T + BLANK_H_FLAT);
+    PartPose p;
+    p.x = CHUTE_X0 + u * (CHUTE_X1 - CHUTE_X0) + off * nx;
+    p.y = CHUTE_Y0 + u * (CHUTE_Y1 - CHUTE_Y0) + off * ny;
+    p.z = CHUTE_ZC;
+    p.tilt_deg = atan2f(-nx, ny) * DEG;                // -45: axis along n
+    return p;
+}
+
+// Slot i of the pile.  Round-robin over the columns, so the pile rises
+// evenly; each part is nudged by a golden-angle step so the columns do not
+// look ruled.  The nudge is small enough that no two parts touch.
+inline PartPose bin_slot(int i) {
+    const int per = BIN_COLS * BIN_COLS, c = i % per, level = i / per;
+    const float mid = 0.5f * (BIN_COLS - 1);
+    const float a = 2.3999632f * i;
+    PartPose p;
+    p.x = 0.5f * (BIN_X0 + BIN_X1) + (c % BIN_COLS - mid) * BIN_PITCH
+        + BIN_JITTER * cosf(a);
+    p.z = (c / BIN_COLS - mid) * BIN_PITCH + BIN_JITTER * sinf(a);
+    p.y = BIN_WALL + (level + 0.5f) * BLANK_H_FLAT;
+    p.tilt_deg = 0.0f;
+    return p;
+}
+
+// Parts in the bin: every part e >= 1 whose local time has reached landing.
+inline long bin_count(Clock c) {
+    const long k = c.n + (long)floorf(c.f - exit_land_t());
+    return k > 0 ? k : 0;
+}
+
+// Where finished part e is, or false before it arrives and after it lands.
+// Part e reaches station 10 when the clock reads e, so its local time is
+// t = (n - e) + f.  `g` is the index progress; it is read only while the part
+// rides its own index, which is the only time it is non-zero for this part.
+//
+//   t in [0, 0.75)     resting on top of the head roller, belt locked
+//   t in [0.75, 1)     riding the wrap to EXIT_TIP_DEG, then tossed onto the
+//                      chute, landing as the index ends and the belt stops
+//   t in [1, 1.30)     sliding down the chute from rest, accelerating
+//   t in [1.30, 1.52)  dropping off the lip into its slot
+//
+// Every boundary is continuous in position, and the toss and the drop are
+// also continuous in velocity with the motion before them.
+inline bool exit_pose(long e, Clock c, float g, PartPose* out) {
+    if (e < 1) return false;
+    const long dn = c.n - e;
+    if (dn < 0 || dn > 1) return false;
+    const float t = (float)dn + c.f;
+    if (t >= exit_land_t()) return false;
+
+    const float hh = 0.5f * BLANK_H_FLAT;
+    // On the belt: w pitches past station 10, on the outer surface.  A quarter
+    // of wrap is exactly one pitch, so the tip angle is a fraction of a pitch.
+    auto on_belt = [hh](float w) {
+        const PathPt q = belt_path((10.0f + w) * pitch());
+        const float a = (q.rot_deg + 90.0f) * RAD;       // outward normal
+        PartPose p = { q.x + hh * cosf(a), q.y + hh * sinf(a), 0.0f, q.rot_deg };
+        return p;
+    };
+    const float w_tip = EXIT_TIP_DEG / 90.0f;
+
+    if (t < index_start_f()) { *out = on_belt(0.0f); return true; }
+
+    if (t < 1.0f) {
+        if (g <= w_tip) { *out = on_belt(g); return true; }
+        // The toss: a quadratic Bezier whose first leg runs along the roller's
+        // tangent where the part leaves it, ending on the chute.  It is keyed
+        // to g, so it lands with the belt's own deceleration to rest.
+        const float s = (g - w_tip) / (1.0f - w_tip), u = 1.0f - s;
+        const PartPose p0 = on_belt(w_tip), p1 = chute_pose(chute_land());
+        const float a  = p0.tilt_deg * RAD;       // clockwise tangent (cos, sin)
+        const float cx = p0.x + EXIT_TOSS * cosf(a);
+        const float cy = p0.y + EXIT_TOSS * sinf(a);
+        out->x = u * u * p0.x + 2.0f * s * u * cx + s * s * p1.x;
+        out->y = u * u * p0.y + 2.0f * s * u * cy + s * s * p1.y;
+        out->z = p1.z * s * s * (3.0f - 2.0f * s);
+        out->tilt_deg = p0.tilt_deg + (p1.tilt_deg - p0.tilt_deg) * s;
+        return true;
+    }
+
+    const float t1 = t - 1.0f;
+    const float run = chute_leave() - chute_land();
+    if (t1 < EXIT_SLIDE) {
+        const float u = t1 / EXIT_SLIDE;
+        *out = chute_pose(chute_land() + run * u * u);
+        return true;
+    }
+
+    // The drop: P(s) = P0 + V s + (P1 - P0 - V) s^2, which leaves the chute at
+    // the slide's final velocity V and lands exactly on the slot.  Once the
+    // bin is full every part aims at the top slot, already drawn, so it lands
+    // on the pile without a second part ever showing there.
+    long slot = e - 1;
+    if (slot > bin_capacity() - 1) slot = bin_capacity() - 1;
+    const PartPose p0 = chute_pose(chute_leave()), p1 = bin_slot((int)slot);
+    const float s  = (t1 - EXIT_SLIDE) / EXIT_DROP;
+    const float k  = 2.0f * run * EXIT_DROP / EXIT_SLIDE;
+    const float vx = k * (CHUTE_X1 - CHUTE_X0), vy = k * (CHUTE_Y1 - CHUTE_Y0);
+    out->x = p0.x + vx * s + (p1.x - p0.x - vx) * s * s;
+    out->y = p0.y + vy * s + (p1.y - p0.y - vy) * s * s;
+    out->z = p0.z + (p1.z - p0.z) * s * s;
+    out->tilt_deg = p0.tilt_deg * (1.0f - s);
+    return true;
 }
 
 // ===========================================================================
