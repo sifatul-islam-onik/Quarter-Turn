@@ -2,13 +2,13 @@
 
 An automated stamping line in OpenGL — CSE 4207 Computer Graphics, KUET.
 
-> **Branch `static-objects`: the objects only, and nothing moves.** The machine
-> is held at one crank angle (`theta` = 90°) and drawn there; the clock that
-> advanced it is gone, so each mechanism can be pointed at and named while it
-> stands still. This branch is `unlit-demo` with the motion removed, so there is
-> no lighting or shading either — flat colours plus an edge pass. The running
-> machine is on `unlit-demo`; lighting, materials and the three shading modes
-> are on `main`.
+> **Branch `static-objects`: the objects only.** There is no motion anywhere in
+> this build — no clock, no speed, no angle that advances, and no code for any
+> of them. The machine stands in one pose so each mechanism can be pointed at
+> and named while it holds still. This branch is `unlit-demo` with the motion
+> taken out, so there is no lighting or shading either — flat colours plus an
+> edge pass. The running machine is on `unlit-demo`; lighting, materials and
+> the three shading modes are on `main`.
 
 A motor drives a train of five meshing brass gears. The largest carries a crank,
 and a crank-slider drives a press ram over a conveyor. The last gear turns a
@@ -22,22 +22,31 @@ roll-up door, a workbench, pipework, ceiling beams), whose near walls drop away
 as the camera orbits. Two bulbs hang over the line, and the bulbs, the exhaust
 fan and the machine each have their own switch.
 
-**The technical claim, and what this branch shows about it:** the machine's
-entire animation state is one accumulating float (`theta`, the crankshaft
-angle) and one integer (`cycles`). Every motion it makes — five meshing gears,
-the press, the intermittent belt and the parts it carries — is a closed-form
-function of those two. No keyframes, no stored poses, no interpolation.
+**What replaces the animation.** On the animated branches the whole machine is
+a closed-form function of one accumulating float (`theta`, the crankshaft
+angle) and one integer (`cycles`), recomputed every frame. Here there is no
+`theta` and no `cycles`, and `src/kinematics.h` is gone. In its place,
+`src/layout.h` holds what is left once time is taken out:
 
-Because of that, taking the animation out is not a rewrite: `theta` and
-`cycles` become two constants and the render loop stops advancing them. Every
-part is still placed by the same functions, so the line is caught mid-cycle
-rather than collapsed into a neutral pose. `src/config.h`, `src/kinematics.h`,
-`src/prim.h`, `src/materials.h`, `src/scene.h` and `src/room.h` are byte for
-byte the ones on `unlit-demo`; only `src/main.cpp` and this file differ.
+- the geometry, which never depended on the angle in the first place — the
+  pitch radii, the derived centres of G3 and G4, the belt's pitch and its
+  stations, the path the belt runs on, the Geneva wheel's radius and centre
+  distance;
+- the mesh law, which is what "meshed" means rather than a motion: each gear's
+  angle from the one that drives it, including the half tooth that faces a
+  tooth at a gap instead of at another tooth;
+- four constants naming the pose — `DRIVE_DEG` for the gear train, `CRANK_DEG`
+  for the press, `ARM_DEG` and `WHEEL_DEG` for the Geneva drive.
 
-The pose is `theta` = 90°: the belt is locked between indexes, the ram is half
-way down its stroke and clear of the blanks, and the Geneva driver's pin is
-outside its slot.
+All of it is worked out once, at startup, and nothing recomputes it afterwards.
+Nothing in `layout.h` takes an angle, a speed or a step.
+
+The pose is the one the animated build starts from: the belt parked between
+indexes, the ram part way down its stroke and clear of the blanks, and the
+Geneva driver's pin outside its slot, so the wheel is locked. The parts that
+only exist while the line runs — a blank dropping from the magazine, a finished
+part riding over the head roller, the pile in the bin — are not in this build,
+because nothing carries them anywhere.
 
 ## Build and run
 
@@ -46,11 +55,10 @@ Requires MSYS2 MinGW64 with `glew` and `freeglut`.
 ```powershell
 .\build.ps1          # build
 .\build.ps1 -Run     # build and run
-.\build.ps1 -Check   # headless verification of every derived number
 .\build.ps1 -Release # -O2, assertions off
 ```
 
-or, from the MSYS2 shell: `make`, `make run`, `make check`, `make release`.
+or, from the MSYS2 shell: `make`, `make run`, `make release`.
 
 ## Controls
 
@@ -86,9 +94,9 @@ the stations they sit on. `4` pulls back to the workshop — walls, windows, the
 roll-up door, the bench, the pipework, the ceiling beams, the two hanging
 bulbs, the exhaust fan and the switch cabinet.
 
-**2. What the pose is showing.** At `theta` = 90° the ram is half way down and
-clear of the blanks, the belt is locked between indexes, and the Geneva driver's
-pin sits outside the slot. Every blank on the belt is drawn at the height its
+**2. What the pose is showing.** The ram is part way down and clear of the
+blanks, the belt is parked between indexes, and the Geneva driver's pin sits
+outside the slot, which is what locks the wheel. Every blank on the belt is drawn at the height its
 own station gives it, so the stamped ones downstream of the press are visibly
 flatter than the ones still waiting: station 7 is where the press works, and the
 squash is a volume-preserving scale, not a different model.
@@ -96,10 +104,10 @@ squash is a volume-preserving scale, not a different model.
 **3. The gear train, standing still.** Each of the five gears sits exactly at
 the sum of its and its neighbour's pitch radius, and at every mesh a tooth on
 one gear faces a gap on the other — that half-tooth offset is `pi/N` in
-`kin::gear_angles()`, and without it the teeth would interpenetrate at rest.
-The teeth counts are 12:36:20:20:36 (`TEETH` in `config.h`); the readout (`h`)
-prints them. Brass and copper alternate along the train, so each mesh is
-between two colours.
+`lay::mesh_angles()`, and without it the teeth would interpenetrate where they
+stand. The teeth counts are 12:36:20:20:36 (`TEETH` in `config.h`); the readout
+(`h`) prints them, with the five angles the gears hold. Brass and copper
+alternate along the train, so each mesh is between two colours.
 
 **4. The hierarchy, in wireframe (`w`).** The crank disc sits on its shaft, the
 rod runs from the crank pin to the wrist pin, and the ram sits between its
@@ -126,12 +134,13 @@ disappear as it orbits. `c` hands the same eye to a free camera, whose view
 direction comes from a yaw and a pitch, which is the way to get in close to one
 mechanism while talking about it.
 
-**7. The numbers behind the pose (`h`).** The readout is the pose's own
-figures, not a running log: the crank angle and its phase, the punch face
-height against the top of a blank and the clearance between them, the Geneva
-wheel's angle, belt travel in stations and how far through an index the line
-is. They are what `kinematics.h` returns for `theta` = 90°, and
-`build\mathcheck.exe` checks the same functions across the whole cycle.
+**7. The numbers behind the pose (`h`).** The readout is what `layout.h` worked
+out at startup and nothing changes afterwards: the five gear angles, the
+derived centres of G3 and G4, the ram and punch heights against the top of a
+blank and the clearance between them, the belt's pitch and its first station,
+and the Geneva wheel's radius and centre distance. The startup checks in
+`verify_layout()` re-prove the load-bearing ones on every run and print them to
+the console.
 
 *For the line actually running — the gears turning, the press stroking, the belt
 indexing one station per stroke and the parts piling into the bin — check out
@@ -139,18 +148,16 @@ indexing one station per stroke and the parts piling into the bin — check out
 
 ## Verification
 
-`build\mathcheck.exe` includes the same `src/kinematics.h` the renderer does, so
-it checks the shipping code rather than a transcription. 62 checks covering the
-belt pitch and loop closure, the press stack, the analytic blank-zone root
-against a 0.01° scan, the Geneva geometry and the pin's position in a slot
-throughout the index, belt-travel monotonicity across both 45° and the wrap, all
-four gear meshes and tooth-to-gap alignment at every angle, volume preservation
-under the squash, and every clearance. For the finished parts it runs eight
-revolutions in 0.02° steps and checks that the stroke clock and a part's whole
-path are continuous and that the part arrives where the belt's last blank stops,
-clears the blank behind it, lands exactly on its slot, and lands one per
-revolution. It also checks that every drop to every one of the 36 slots stays
-inside the bin's walls below the rim, and that the full pile fits.
+`tests/mathcheck.cpp` is not on this branch. It verified the motion — belt
+travel, the stroke clock, a part's path through the air, the interlock across a
+whole cycle — and there is no motion here to verify. It is on `unlit-demo` and
+on `main`, unchanged.
+
+What is left runs at startup, in `verify_layout()` in `src/main.cpp`, in
+release builds too: the rod's obliquity, the tail roller's position, the
+Geneva centre distance and wheel radius, all four meshes at their pitch-radius
+sums, and that the punch clears an unstamped blank in this pose. A failure
+prints `LAYOUT CHECK FAILED` to the console and names the number.
 
 ## Deviations from the PRD
 
@@ -190,7 +197,9 @@ hang either side of the press, 1.0 in front of the belt and 2.4 above it.
 bulb and the fan have their own switch, drawn as rockers with status lamps on
 the electrical cabinet, in the same colours as the HUD's dots. The HUD is one
 small panel (switches, speed, parts) and a key hint; the full technical
-readout the demonstrations above refer to is behind `h`.
+readout the demonstrations above refer to is behind `h`. On this branch the
+panel lists the four switches and nothing else: speed and a parts count would
+both be meaningless.
 
 **There is a room** (`room.h`). The PRD says "no factory building". The line
 now stands in a 15 × 8 × 9.5 workshop. Each wall, and everything fixed to it, is
@@ -208,32 +217,28 @@ switches the near plane from 4.0 to 0.2 while it is on, and far/near becomes
 height of 20. Every room corner then stays within a depth of 36.5, and a 24-bit
 depth step there is 0.0004, so the hazard marks, 0.004 above the floor, stay
 about ten steps clear. It moves at speed × `dt` from held keys, not on key
-repeat, so it stays frame-rate independent like the machine. Walls hide the
-same way as in the presets: fly out through a wall and it disappears.
+repeat, so it is frame-rate independent — on this branch it is the only thing
+left that moves at all. Walls hide the same way as in the presets: fly out
+through a wall and it disappears.
 - The **floor grows** to the room, in 1.0 tiles (15 × 8).
 - **Eight room colours** are added (wall paint, safety yellow, wood, signal
   red, galvanized steel, window glass, and a bulb lit and unlit).
-- The **parts counter** is closed-form in `theta` and `cycles` and reads
-  `kin::parts_made()`, the same function the HUD uses. The **fan** is not: with
-  its own switch it keeps its own speed and angle, and closes on its target
-  speed with a 0.8 s first-order lag.
+- The **parts counter** on the back wall reads `lay::PARTS_MADE`, which is zero
+  here: nothing has been made, because nothing runs. On the animated branches it
+  counts finished parts. The **fan** stands at one blade angle; its switch still
+  throws and its lamp still lights, but there is no spin to start.
 - The spare gears on the shelf and the pallet's blanks call the machine's own
   display lists. The stamped part on the bench is built flat at the squashed
   radius, so the squash is still the only `glScalef`.
 
-**Finished parts leave the line instead of vanishing** (`kinematics.h`,
-`exit_pose()`). The PRD's hood had a closed far end, and a part was removed
-out of sight under it at the end of each index. The far end is now open. A
-part rests on top of the head roller while the belt is locked, rides the next
-index over the roller to 40° of wrap, and is tossed onto the chute. It lands as
-the index ends, slides down, and drops into the bin. The exit runs on a
-*stroke clock*, the count of finished indices plus the fraction of a revolution
-since the last one, so it is closed-form in `theta` and `cycles` like the belt
-and scales with the speed. The toss follows the roller's tangent and the drop
-leaves the chute at the slide's speed, so neither kinks. The bin piles parts in
-2 × 2 columns, 36 in all. Once it is full, each new part aims at the top slot,
-which is already drawn, so it lands on the pile without a second copy ever
-showing. `r` empties the bin with everything else.
+**Finished parts leave the line instead of vanishing** — on the animated
+branches. The PRD's exit hood had a closed far end, and a part was removed out
+of sight under it at the end of each index; there the far end is open and a
+part rides over the head roller, is tossed onto the chute, slides down and
+drops into the bin, which piles 36. None of that is here: a part reaches the
+bin by being carried, and nothing in this build carries anything, so the hood,
+the chute and the bin are drawn empty and the code for the exit is on
+`unlit-demo` and `main`.
 
 **The chute is short and held to the near side** (`config.h`). At full size it
 drew straight across the Geneva drive gear; it is 0.85 in front of the gear
@@ -244,11 +249,10 @@ plane, so this is composition, not collision.
 | File | Contents |
 |---|---|
 | `src/config.h` | every tunable number, PRD-section referenced |
-| `src/kinematics.h` | all closed-form motion — no OpenGL, shared with the test |
+| `src/layout.h` | where every part stands — no OpenGL, no time, evaluated once |
 | `src/prim.h` | the one box routine and one cylinder routine |
 | `src/materials.h` | one flat colour per material, for the machine and the room |
 | `src/scene.h` | display lists and the per-frame hierarchy |
 | `src/room.h` | the cutaway workshop: walls, ceiling, bulbs and glow, cabinet switches, fan, counter |
-| `src/main.cpp` | GLUT glue, the fixed pose and the switches, input, HUD, the fill and edge passes |
-| `tests/mathcheck.cpp` | headless verification of PRD §10 |
+| `src/main.cpp` | GLUT glue, the switches, input, HUD, the fill and edge passes |
 | `PRD.md` | the requirements document this implements |

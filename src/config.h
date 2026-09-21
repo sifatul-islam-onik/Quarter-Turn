@@ -1,6 +1,6 @@
 // config.h - every tunable number in "Quarter Turn", in one place.
 // Section references are to PRD.md.  Numbers that the PRD *derives* are not
-// typed in here; they are computed in kinematics.h and asserted at startup.
+// typed in here; they are computed in layout.h and asserted at startup.
 #ifndef CONFIG_H
 #define CONFIG_H
 
@@ -38,13 +38,10 @@ constexpr float FREE_PITCH_MAX = 89.0f;     // at 90 gluLookAt's up is degenerat
 constexpr float FREE_RADIUS = 22.0f;
 constexpr float FREE_Y_MIN = 0.3f, FREE_Y_MAX = 20.0f;
 
-// ---- Timing and state (PRD FR-1, FR-2) -------------------------------------
-// One crankshaft revolution is one part, so omega is shown as parts/minute.
-constexpr float PPM_MIN = 6.0f, PPM_MAX = 120.0f, PPM_DEFAULT = 30.0f;
-constexpr float PPM_STEP = 6.0f;
-constexpr float DT_CLAMP = 0.1f;         // a window drag must not skip a phase
-constexpr float STEP_DEG = 5.0f;         // the '.' key
-constexpr float RESET_THETA_DEG = 90.0f; // belt at rest, ram descending, B = 0
+// ---- Timing (PRD FR-1) -----------------------------------------------------
+// The machine is static in this build, so the only thing left with a speed is
+// the free camera above, and this is the one timing number it needs.
+constexpr float DT_CLAMP = 0.1f;         // a window drag must not jump the eye
 
 // ---- Gear train (PRD FR-3) -------------------------------------------------
 // r = m*N/2, and two meshing gears sit exactly r_i + r_j apart.
@@ -123,13 +120,10 @@ constexpr float PART_CHAMFER  = 0.025f;   // rollers, crank disc, pins, shafts
 constexpr int   PRESS_STATION = 7;    // furthest upstream station the
                                       // two-idler train can reach
 constexpr int   LABELS = 9;           // blanks carry labels 1..9
-constexpr float FRESH_G = 0.605f;     // reveal once the departing blank has
-constexpr float FRESH_SPAN = 0.10f;   // cleared by 2r + 0.02 = 0.38
-constexpr float MAG_BOTTOM = 3.24f;   // tube's lower edge, above a blank top
 
 // ---- Geneva mechanism (PRD FR-5) -------------------------------------------
 // c = a/sin(pi/n) = 0.7778 and wheel radius sqrt(c^2 - a^2) = 0.55 are both
-// derived in kinematics.h; only the free choices are typed here.
+// derived in layout.h; only the free choices are typed here.
 constexpr int   GEN_SLOTS = 4;
 constexpr float GEN_A = 0.55f;        // driver pin orbit radius
 constexpr float GEN_LOC_DEG = 135.0f; // line of centres, driver -> wheel
@@ -167,19 +161,9 @@ constexpr float CHUTE_X0 = 4.55f, CHUTE_Y0 = 2.35f;
 constexpr float CHUTE_X1 = 5.45f, CHUTE_Y1 = 1.45f;
 constexpr float CHUTE_T = 0.06f, CHUTE_Z = 0.50f, CHUTE_ZC = 0.22f;
 
-// Finished parts.  The belt carries each one over the head roller, where it
-// tips off at EXIT_TIP_DEG of wrap and is tossed onto the chute, slides down
-// and drops into the bin.  A part rests at station 10 while the belt is
-// locked, rides and lands on the chute during the next index, then slides and
-// drops before the index after that.  Times are in crank revolutions, so the
-// exit is keyed to theta like every other motion and scales with the speed.
-constexpr float EXIT_TIP_DEG = 40.0f;
-constexpr float EXIT_TOSS  = 0.35f;   // reach of the toss along the roller's tangent
-constexpr float EXIT_SLIDE = 0.30f, EXIT_DROP = 0.22f;
-// The bin piles parts round-robin in 2 x 2 columns, 9 high: 36 parts.  Past
-// that it stays full, and each new part lands on the top of the pile.
-constexpr int   BIN_COLS = 2, BIN_LEVELS = 9;
-constexpr float BIN_PITCH = 0.54f, BIN_JITTER = 0.01f;
+// The bin below the chute is drawn empty here: a finished part reaches it by
+// being carried over the head roller, and nothing in this build is carried
+// anywhere.
 
 // ---- Stack light (PRD 4.2 row 14, FR-14) -----------------------------------
 constexpr float STACK_X = 5.50f, STACK_Z = -0.80f;
@@ -235,10 +219,7 @@ constexpr float LWIN_Z[2] = { -1.30f, 2.20f };
 // Back wall (z = ROOM_Z0), positions as world x.
 constexpr float BWIN_X[2] = { -4.50f, 7.60f };
 constexpr float FAN_X = -1.70f, FAN_Y = 5.00f, FAN_SIZE = 1.00f;
-// The fan has its own switch, so it is not geared to theta: it runs at
-// FAN_RPS and spins up or runs down with a first-order lag of FAN_TAU seconds.
 constexpr int   FAN_BLADES = 6;
-constexpr float FAN_RPS = 2.5f, FAN_TAU = 0.8f;
 constexpr float COUNTER_X = 4.50f, COUNTER_Y = 6.45f;   // over the panel, clear
                                       // of the HUD text in views 1 and 2
 constexpr int   COUNTER_DIGITS = 4;

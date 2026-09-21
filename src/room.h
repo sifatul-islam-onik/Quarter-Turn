@@ -2,10 +2,11 @@
 // hanging bulbs, and what stands on the floor.  Not in the PRD, which says "no
 // factory building"; the deviation is in the README.
 //
-// The machine does not know the room exists.  Nothing here feeds kinematics.
-// The parts counter is a closed-form function of (theta, cycles) like the
-// machine; the exhaust fan is not, because it has its own switch, so its angle
-// is the one piece of animation state outside FR-2's two variables.
+// The machine does not know the room exists, and nothing here feeds it.  The
+// room has its own four switches, which decide what is drawn - a lever's
+// throw, its lens, the bulbs and their halos - and nothing more: this is the
+// static build, so the exhaust fan stands at one angle and the parts counter
+// reads one number.
 //
 // The room is a cutaway.  A wall and everything mounted on it is drawn only
 // while the eye is on the room side of that wall's plane, so whichever walls
@@ -124,9 +125,9 @@ inline void spare_gear(int i, float u, float y, float z) {
     glPushMatrix();
     glTranslatef(u, y + scene::gear_tip_r(i), z);
     glCallList(scene::L(scene::L_GEAR0 + i));
-    for (int k = 0; k < kin::LAY.g[i].N; ++k) {
+    for (int k = 0; k < lay::LAY.g[i].N; ++k) {
         glPushMatrix();
-        glRotatef(360.0f * k / kin::LAY.g[i].N, 0, 0, 1);
+        glRotatef(360.0f * k / lay::LAY.g[i].N, 0, 0, 1);
         glTranslatef(scene::gear_root_r(i), 0.0f, 0.0f);
         glCallList(scene::L(scene::L_TOOTH));
         glPopMatrix();
@@ -637,11 +638,10 @@ inline void draw_switches(const bool* sw) {
 }
 
 // `eye` is the camera position in world space, which decides the cutaway.
-// `sw` is indexed by Switch; `fan_deg` is the fan's own accumulated angle.
-// `edge_pass` leaves out the glass globes: outlined, their fine latitude and
-// longitude bands read as a wire cage rather than a bulb.
-inline void draw(const float* eye, float th, long cycles, float fan_deg,
-                 const bool* sw, bool edge_pass) {
+// `sw` is indexed by Switch.  `edge_pass` leaves out the glass globes:
+// outlined, their fine latitude and longitude bands read as a wire cage rather
+// than a bulb.
+inline void draw(const float* eye, const bool* sw, bool edge_pass) {
     glCallList(L(R_FLOOR_ITEMS));
     draw_switches(sw);
 
@@ -653,10 +653,9 @@ inline void draw(const float* eye, float th, long cycles, float fan_deg,
         enter_wall(BACK);
         glPushMatrix();
         glTranslatef(back_u(FAN_X), FAN_Y, 0.0f);
-        glRotatef(-fan_deg, 0, 0, 1);
-        glCallList(L(R_FAN));
+        glCallList(L(R_FAN));                       // the blades, at rest
         glPopMatrix();
-        draw_counter(kin::parts_made(th, cycles));
+        draw_counter(lay::PARTS_MADE);
         glPopMatrix();
     }
 

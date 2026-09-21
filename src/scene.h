@@ -24,14 +24,14 @@
 #define SCENE_H
 
 #include "prim.h"
-#include "kinematics.h"
+#include "layout.h"
 #include "materials.h"
 
 namespace scene {
 
 using namespace cfg;
 using namespace prim;
-using kin::LAY;
+using lay::LAY;
 
 // Flat colours (materials.h).  Each is a compile-time constant, so baking one
 // into a display list is correct; the stack light's colour is the only one in
@@ -72,7 +72,7 @@ inline float gear_tip_r (int i) { return LAY.g[i].r + TOOTH_ADDENDUM * MODULE; }
 // 0.045 reaches 0.183, so the slot is cut to GEN_HUB_R = 0.175 and the pin
 // clears the bottom by 0.008 instead of bottoming out at the deepest point.
 inline void build_geneva_wheel() {
-    const float R  = kin::gen_wheel_r();
+    const float R  = lay::gen_wheel_r();
     const float hw = GEN_SLOT_HW;
     const float u0 = asinf(hw / R);            // arm end, where r_in meets rim
     const float uc = asinf(hw / GEN_HUB_R);    // wall meets hub arc
@@ -128,7 +128,7 @@ inline void arc_shell(float cx, float cy, float a0, float a1, int segs) {
 inline void build_lists() {
     g_list = glGenLists(L_COUNT);
 
-    const float xt = kin::tail_x();
+    const float xt = lay::tail_x();
 
     // ---- floor (PRD 4.2 row 1) --------------------------------------------
     glNewList(L(L_FLOOR), GL_COMPILE);
@@ -207,7 +207,7 @@ inline void build_lists() {
     glNewList(L(L_FIXTURES), GL_COMPILE);
     c_plastic();
     {   // feed magazine: a square tube whose lower edge sits above a blank top
-        const float mx = kin::station_x(1);
+        const float mx = lay::station_x(1);
         const float o = 0.5f * MAG_W, i = o - MAG_WALL;
         box_span(mx - o, MAG_Y0, -o, mx - i, MAG_Y1, o);
         box_span(mx + i, MAG_Y0, -o, mx + o, MAG_Y1, o);
@@ -305,16 +305,18 @@ inline void build_lists() {
 }
 
 // ---------------------------------------------------------------------------
-// Per-frame drawing.  Everything below is a pure function of (theta, cycles).
+// Drawing.  Nothing below takes an angle or a time: every transformation is
+// built from layout.h, which is fixed at startup, so the same picture is
+// drawn every frame.
 // ---------------------------------------------------------------------------
 // Brass and copper alternate along the train (G1-G2, G2-G3, G3-G4, G4-G5), so
 // the two gears at every mesh are different colours.
-inline void draw_gears(const float* phi) {
+inline void draw_gears() {
     for (int i = 0; i < 5; ++i) {
         mat::use(i == 1 || i == 3 ? mat::COPPER : mat::BRASS);
         glPushMatrix();
         glTranslatef(LAY.g[i].cx, LAY.g[i].cy, GEAR_Z);
-        glRotatef(phi[i] * DEG, 0, 0, 1);
+        glRotatef(LAY.phi[i] * DEG, 0, 0, 1);
         glCallList(L(L_GEAR0 + i));
         const float rr = gear_root_r(i);
         for (int k = 0; k < LAY.g[i].N; ++k) {      // 124 instances in total
@@ -328,18 +330,17 @@ inline void draw_gears(const float* phi) {
     }
 }
 
-// Chain A: crankshaft -> disc -> pin -> rod -> ram.  The crank pin is at the
-// top when theta = 0, so the shaft frame is keyed 90 degrees off the angle.
-inline void draw_press(float th, float sn, float cs) {
-    const float px = PRESS_X + CRANK_R * sn;    // sin/cos are computed once per
-    const float py = CRANK_Y + CRANK_R * cs;    // frame and passed down, FR-15
-    const float s  = CRANK_Y + CRANK_R * cs
-                   - sqrtf(ROD_L * ROD_L - CRANK_R * CRANK_R * sn * sn);
+// Chain A: crankshaft -> disc -> pin -> rod -> ram.  Four levels of
+// glPushMatrix, each one a child of the level above; the disc's own frame is
+// unrotated in this pose, which is what puts the pin at 3 o'clock.
+inline void draw_press() {
+    const float px = lay::PIN_X, py = lay::PIN_Y;
+    const float s  = lay::ram_top();
 
     c_silver();
     glPushMatrix();
     glTranslatef(PRESS_X, CRANK_Y, 0.0f);
-    glRotatef(90.0f - th * DEG, 0, 0, 1);
+    glRotatef(lay::CRANK_DEG, 0, 0, 1);
     glPushMatrix();
     glTranslatef(0, 0, PANEL_CZ + 0.5f * PANEL_D);
     cyl_z(CRANK_SHAFT_R, CRANK_DISC_Z0 - (PANEL_CZ + 0.5f*PANEL_D), 14,
@@ -357,11 +358,11 @@ inline void draw_press(float th, float sn, float cs) {
 
     // connecting rod - placed from both of its endpoints, which is a composite
     // transformation in its own right.  Its length is exactly ROD_L because
-    // that is what s(theta) solves for.
+    // that is what ram_top() solves for.
     c_steel();
     glPushMatrix();
     glTranslatef(px, py, 0.0f);
-    glRotatef(atan2f(s - py, PRESS_X - px) * DEG, 0, 0, 1);
+    glRotatef(lay::rod_deg(), 0, 0, 1);
     glTranslatef(0.5f * ROD_L, 0.0f, 0.0f);
     box(ROD_L, ROD_W, ROD_D);
     glPopMatrix();
@@ -379,9 +380,9 @@ inline void draw_press(float th, float sn, float cs) {
     glPopMatrix();
 }
 
-// Chain C: Geneva shaft -> driver arm -> pin.  The arm is keyed to G5's shaft,
-// so its angle is phi5 plus a constant computed once at startup.
-inline void draw_geneva_driver(const float* phi) {
+// Chain C: Geneva shaft -> driver arm -> pin.  The arm is keyed to G5's shaft;
+// where that leaves it in this pose is lay::ARM_DEG.
+inline void draw_geneva_driver() {
     c_silver();
     glPushMatrix();
     glTranslatef(G5_X, G5_Y, GEN_SHAFT_Z0);
@@ -390,7 +391,7 @@ inline void draw_geneva_driver(const float* phi) {
 
     glPushMatrix();
     glTranslatef(G5_X, G5_Y, 0.0f);
-    glRotatef(kin::driver_arm_deg(phi), 0, 0, 1);
+    glRotatef(lay::ARM_DEG, 0, 0, 1);
     box_span(-GEN_ARM_W, -0.5f*GEN_ARM_W, GEN_ARM_Z0,
              GEN_A + GEN_ARM_W, 0.5f*GEN_ARM_W, GEN_ARM_Z0 + GEN_ARM_T);
     glPushMatrix();
@@ -401,9 +402,9 @@ inline void draw_geneva_driver(const float* phi) {
 }
 
 // Chain D: conveyor frame -> rollers -> Geneva wheel, and the belt branches.
-inline void draw_conveyor(float B) {
-    const float wa = kin::wheel_angle_deg(B);
-    const float xt = kin::tail_x();
+inline void draw_conveyor() {
+    const float wa = lay::WHEEL_DEG;
+    const float xt = lay::tail_x();
 
     c_silver();
     for (int e = 0; e < 2; ++e) {
@@ -427,7 +428,7 @@ inline void draw_conveyor(float B) {
 
     mat::use(mat::SAFETY_YELLOW);                    // 24 cleats on the loop
     for (int k = 0; k < CLEAT_N; ++k) {
-        const kin::PathPt q = kin::belt_path(kin::cleat_s(k, B));
+        const lay::PathPt q = lay::belt_path(lay::cleat_s(k));
         glPushMatrix();
         glTranslatef(q.x, q.y, 0.0f);
         glRotatef(q.rot_deg, 0, 0, 1);
@@ -440,7 +441,7 @@ inline void draw_conveyor(float B) {
 // flattened part stays on the belt instead of being lifted off it; scaling
 // about the centre would do the opposite.  (x, y, z) is the base centre.
 inline void draw_blank(float x, float y, float h, float z = 0.0f) {
-    const float q = kin::squash_q(h);
+    const float q = lay::squash_q(h);
     glPushMatrix();
     glTranslatef(x, y, z);
     glScalef(1.0f / sqrtf(q), q, 1.0f / sqrtf(q));
@@ -448,37 +449,16 @@ inline void draw_blank(float x, float y, float h, float z = 0.0f) {
     glPopMatrix();
 }
 
-// A finished part in flight or in the bin: turned about its own centre, then
-// drawn through the same squash as every other blank.
-inline void draw_part(const kin::PartPose& p) {
-    const float hh = 0.5f * BLANK_H_FLAT;
-    glPushMatrix();
-    glTranslatef(p.x, p.y, p.z);
-    glRotatef(p.tilt_deg, 0, 0, 1);
-    draw_blank(0.0f, -hh, BLANK_H_FLAT);
-    glPopMatrix();
-}
-
-inline void draw_blanks(float th, long cycles, float g) {
+// The nine blanks, one on each station: full height up to the press at
+// station 7, flat past it.  The belt is parked, so each one sits square on its
+// own station.
+inline void draw_blanks() {
     c_silver();
-    const float p = kin::pitch(), xt = kin::tail_x();
     for (int j = 1; j <= LABELS; ++j)
-        draw_blank(xt + (j + g) * p, BELT_TOP_Y, kin::blank_h(j, th));
-    if (kin::phase_of(th) == kin::PH_INDEX && kin::fresh_visible(g))
-        draw_blank(kin::station_x(1), kin::fresh_blank_y(g), BLANK_H);
-
-    // Finished parts: at most one on the head roller and one on its way down,
-    // then the pile in the bin.
-    const kin::Clock c = kin::stroke_clock(th, cycles);
-    kin::PartPose pose;
-    for (long e = c.n - 1; e <= c.n; ++e)
-        if (kin::exit_pose(e, c, g, &pose)) draw_part(pose);
-    long piled = kin::bin_count(c);
-    if (piled > kin::bin_capacity()) piled = kin::bin_capacity();
-    for (int i = 0; i < (int)piled; ++i) draw_part(kin::bin_slot(i));
+        draw_blank(lay::station_x(j), BELT_TOP_Y, lay::blank_h(j));
 }
 
-inline void draw_stack_light(kin::Phase ph) {
+inline void draw_stack_light() {
     c_paint();
     glPushMatrix();
     glTranslatef(STACK_X, 0.0f, STACK_Z);
@@ -490,19 +470,17 @@ inline void draw_stack_light(kin::Phase ph) {
     cyl(STACK_R, STACK_Y0 - STACK_POST_H, 14);
     glPopMatrix();
 
-    // green: APPROACH and RETREAT.  amber: INDEX.  red: STAMP.
-    //
-    // The lit lens is drawn in its full colour and the other two dimmed.  The
-    // colour changes with the phase, so it is set OUTSIDE the display list,
-    // immediately before calling it: a list captures the values passed to
-    // glColor when it was compiled, not a reference to them, so a colour baked
-    // into the list could never change (PRD FR-15).
-    const int lit = (ph == kin::PH_STAMP) ? 2 : (ph == kin::PH_INDEX ? 1 : 0);
+    // green, amber, red upward, the lit one in its full colour and the other
+    // two dimmed.  The three lenses share one display list and differ only in
+    // the colour set immediately before each call: a list captures the values
+    // passed to glColor when it was compiled, not a reference to them, so the
+    // colour cannot be baked into the list (PRD FR-15).
     const float base[3][3] = {{0.10f, 0.85f, 0.20f},
                               {0.95f, 0.65f, 0.05f},
                               {0.90f, 0.12f, 0.10f}};
     for (int i = 0; i < 3; ++i) {
-        mat::use(mat::lens(base[i][0], base[i][1], base[i][2], i == lit));
+        mat::use(mat::lens(base[i][0], base[i][1], base[i][2],
+                           i == lay::STACK_LIT));
         glPushMatrix();
         glTranslatef(STACK_X, STACK_Y0 + i * STACK_SEG_H, STACK_Z);
         glCallList(L(L_STACK_SEG));
@@ -510,16 +488,10 @@ inline void draw_stack_light(kin::Phase ph) {
     }
 }
 
-inline void draw(float th, long cycles) {
-    float phi[5];
-    kin::gear_angles(LAY.g, LAY.drivenBy, th, phi);
-    const float B  = kin::belt_travel(th, cycles);
-    const float g  = kin::index_progress(th);
-    const float sn = sinf(th), cs = cosf(th);        // hoisted, FR-15
-
-    // Static geometry.  Each list carries its own colour, which is safe because
-    // none of these change at runtime; the stack light's is the one that does,
-    // and it is set outside its list below.
+inline void draw() {
+    // Each list carries its own colour, which is safe because none of them
+    // change; the stack light's lenses are the exception, and their colour is
+    // set outside the list below.
     glCallList(L(L_FLOOR));
     glCallList(L(L_PANEL));
     glCallList(L(L_CONVEYOR));
@@ -527,12 +499,15 @@ inline void draw(float th, long cycles) {
     glCallList(L(L_MOTOR));
     glCallList(L(L_BELT));
 
-    draw_gears(phi);
-    draw_press(th, sn, cs);
-    draw_geneva_driver(phi);
-    draw_conveyor(B);
-    draw_blanks(th, cycles, g);
-    draw_stack_light(kin::phase_of(th));
+    // The four transformation chains, each built fresh from layout.h.  They
+    // are not folded into the lists above because they are what the hierarchy
+    // demonstration points at (PRD FR-15).
+    draw_gears();
+    draw_press();
+    draw_geneva_driver();
+    draw_conveyor();
+    draw_blanks();
+    draw_stack_light();
 }
 
 } // namespace scene

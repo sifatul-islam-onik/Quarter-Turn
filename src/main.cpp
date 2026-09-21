@@ -1,12 +1,15 @@
 // "Quarter Turn" - an automated stamping line in OpenGL.
 //
-// STATIC BUILD - the objects only, with nothing in motion.  The machine is
-// held at one fixed crank angle, and every part of it - five meshing gears, a
-// press, an intermittent belt and the blanks it carries - is drawn at the pose
-// that one angle gives it.  Every other file - config.h, kinematics.h, prim.h,
-// materials.h, scene.h, room.h - is the animated build's, untouched; what is
-// gone is the clock that advanced the angle, so the scene can be pointed at
-// and explained part by part.
+// STATIC BUILD - the objects only.  There is no motion anywhere in this
+// branch: no clock, no speed, no angle that advances.  Every part of the line
+// - five meshing gears, a press, an intermittent belt and the blanks it
+// carries - stands where layout.h puts it, which is computed once at startup
+// and never again, so the scene can be pointed at and explained part by part.
+//
+// layout.h is where the animated build's kinematics.h was.  What it keeps is
+// the geometry: the derived gear centres, the mesh law that faces a tooth at
+// a gap, the belt's path and its stations.  What it drops is everything that
+// only meant something while the crank turned.
 //
 // Still live, because none of it is the machine moving: the camera (four
 // preset views, orbit and the free camera), the room's four switches, the
@@ -27,35 +30,24 @@
 #include <cstdio>
 
 #include "config.h"
-#include "kinematics.h"
+#include "layout.h"
 #include "scene.h"
 #include "room.h"
 
 using namespace cfg;
 
 // ---------------------------------------------------------------------------
-// The pose.  In the animated build these two are the whole animation state
-// (PRD FR-2) and the render loop advances theta; here they are constants, so
-// every mechanism is drawn at one instant and stays there.
+// State.  The machine has none: where every part of it stands is in layout.h.
+// What is left is the room's four switches and how the scene is drawn.
 //
-// 90 degrees is the angle that build resets to, and it is the clearest one to
-// stand on: the belt is stationary between indexes, the ram is half way down
-// its stroke well clear of the blanks, and the Geneva driver's pin is outside
-// its slot - so each mechanism is caught where it can be pointed at.
+// The switches change what is drawn - a lever's throw, its lens, the bulbs and
+// their halos - and nothing else.  The machine's and the fan's start nothing,
+// because there is nothing to start.
 // ---------------------------------------------------------------------------
-static const float POSE_THETA = RESET_THETA_DEG * RAD;  // crank angle, radians
-static const long  POSE_CYCLE = 0;                      // parts finished so far
-
-static bool  wireframe = false;
-
-// The room's switches, independent of each other.  They still change what is
-// drawn - the lever's throw, its lens, the bulbs and their halos - but nothing
-// in this build moves over time, so the fan's blades hold still with its
-// switch on, at the one angle below.
+static bool  wireframe  = false;
 static bool  machine_on = true;                // the machine's own switch
 static bool  bulb_on[2] = { true, true };      // left, right
-static bool  fan_on  = true;
-static const float FAN_DEG = 0.0f;             // the fan's fixed blade angle
+static bool  fan_on     = true;
 
 // Rendering state
 static bool edges   = true;                    // e: the edge-line pass
@@ -286,7 +278,7 @@ static void status_panel(float& bottom) {
 }
 
 // The technical readout the README's walk-through refers to, behind `h`: the
-// numbers behind the pose on screen, all of them constant in this build.
+// numbers layout.h worked out at startup, none of which change afterwards.
 static void details_panel(float top) {
     struct Line { float r, g, b; char s[160]; };
     Line L[10];
@@ -296,26 +288,34 @@ static void details_panel(float top) {
         return L[n++].s;
     };
 
-    const kin::Phase ph = kin::phase_of(POSE_THETA);
-    const float B  = kin::belt_travel(POSE_THETA, POSE_CYCLE);
-    const float pf = kin::punch_face(POSE_THETA);
-    const float h7 = kin::press_blank_h(POSE_THETA);
+    float deg[5];
+    for (int i = 0; i < 5; ++i) {                    // wrapped to [0, 360)
+        deg[i] = fmodf(lay::LAY.phi[i] * DEG, 360.0f);
+        if (deg[i] < 0.0f) deg[i] += 360.0f;
+    }
+    const float blank_top = BELT_TOP_Y + BLANK_H;    // an unstamped blank
 
-    snprintf(add(0.95f, 0.95f, 0.90f), 160, "theta %6.1f deg (held)  %-8s  %s",
-             POSE_THETA * DEG, kin::phase_name(ph),
-             kin::belt_locked(ph) ? "belt locked" : "belt free");
+    snprintf(add(0.95f, 0.95f, 0.90f), 160,
+             "gears stand at %.1f %.1f %.1f %.1f %.1f deg",
+             deg[0], deg[1], deg[2], deg[3], deg[4]);
     snprintf(add(0.80f, 0.86f, 0.95f), 160,
-             "punch face %.3f  blank top %.3f  clearance %+.3f",
-             pf, BELT_TOP_Y + h7, pf - (BELT_TOP_Y + h7));
+             "teeth %d:%d:%d:%d:%d   G3 (%.3f, %.3f)  G4 (%.3f, %.3f) derived",
+             TEETH[0], TEETH[1], TEETH[2], TEETH[3], TEETH[4],
+             lay::LAY.g[2].cx, lay::LAY.g[2].cy,
+             lay::LAY.g[3].cx, lay::LAY.g[3].cy);
     snprintf(add(0.80f, 0.86f, 0.95f), 160,
-             "Geneva %7.2f deg  belt %.4f stations  index %.3f",
-             kin::wheel_angle_deg(B), B, kin::index_progress(POSE_THETA));
+             "ram top %.3f  punch face %.3f  blank top %.3f  clear %+.3f",
+             lay::ram_top(), lay::punch_face(), blank_top,
+             lay::punch_face() - blank_top);
     snprintf(add(0.80f, 0.86f, 0.95f), 160,
-             "teeth %d:%d:%d:%d:%d   one turn of the crank is one part",
-             TEETH[0], TEETH[1], TEETH[2], TEETH[3], TEETH[4]);
+             "belt pitch %.4f  station 1 at %.3f  loop %.0f pitches",
+             lay::pitch(), lay::station_x(1), lay::loop_len() / lay::pitch());
+    snprintf(add(0.80f, 0.86f, 0.95f), 160,
+             "Geneva wheel r %.3f  centres %.4f  arm at %.0f deg, pin clear",
+             lay::gen_wheel_r(), lay::gen_centre_dist(), lay::ARM_DEG);
 
     snprintf(add(0.50f, 0.52f, 0.56f), 160,
-             "static build - the crank does not turn   w wireframe   e edges");
+             "nothing here moves - the numbers are fixed at startup");
 
     const float x0 = 12.0f, pad = 12.0f, row = 17.0f;
     float w = 0.0f;
@@ -377,8 +377,8 @@ static void hud() {
 // GLUT callbacks
 // ---------------------------------------------------------------------------
 static void draw_world(const bool* sw, bool edge_pass = false) {
-    scene::draw(POSE_THETA, POSE_CYCLE);
-    room::draw(eye_pos, POSE_THETA, POSE_CYCLE, FAN_DEG, sw, edge_pass);
+    scene::draw();
+    room::draw(eye_pos, sw, edge_pass);
 }
 
 // An edge pixel keeps this fraction of the face colour under it.
@@ -534,13 +534,12 @@ static void motion(int x, int y) {
 }
 
 // ---------------------------------------------------------------------------
-// Startup checks.  These are the numbers PRD 10 records; asserting them here
-// means a change to the press stack or the Geneva geometry cannot quietly
-// invalidate the interlock.
+// Startup checks.  These are the numbers PRD 10 records, and they are what
+// layout.h derives rather than types in, so a change to the gear layout or the
+// press stack cannot quietly put the machine out of shape.
 // ---------------------------------------------------------------------------
 // Checked in release too, not with assert: a layout that quietly stops holding
-// under -DNDEBUG is exactly the failure the PRD calls invisible.  The full set
-// lives in tests/mathcheck.cpp; these are the ones worth re-proving every run.
+// under -DNDEBUG is exactly the failure the PRD calls invisible.
 static int g_layout_fails = 0;
 static void must(bool ok, const char* what) {
     if (!ok) { fprintf(stderr, "LAYOUT CHECK FAILED: %s\n", what); ++g_layout_fails; }
@@ -548,30 +547,31 @@ static void must(bool ok, const char* what) {
 
 static void verify_layout() {
     must(ROD_L >= MIN_L_OVER_R * CRANK_R, "rod obliquity: L/r >= 2.5");
-    must(fabsf(kin::ram_top(0.0f) - 4.00f) < 1e-4f, "s_max = 4.00");
-    must(fabsf(kin::ram_top(PI)  - 3.50f) < 1e-4f, "s_min = 3.50");
-    must(fabsf(kin::tail_x() + 2.283185f) < 1e-4f, "tail roller at -2.2832");
-    must(fabsf(kin::gen_centre_dist() - 0.77782f) < 1e-4f, "Geneva c = 0.7778");
-    must(fabsf(kin::gen_wheel_r() - 0.55f) < 1e-4f, "Geneva wheel r = 0.55");
+    must(fabsf(lay::tail_x() + 2.283185f) < 1e-4f, "tail roller at -2.2832");
+    must(fabsf(lay::gen_centre_dist() - 0.77782f) < 1e-4f, "Geneva c = 0.7778");
+    must(fabsf(lay::gen_wheel_r() - 0.55f) < 1e-4f, "Geneva wheel r = 0.55");
+    // The pose itself: the ram hangs clear of an unstamped blank, which is
+    // what makes it a pose worth standing the demo on.
+    must(lay::punch_face() > BELT_TOP_Y + BLANK_H,
+         "the punch does not clear the blanks in this pose");
     for (int i = 0; i < 5; ++i) {                            // pitch-radius sums
-        const int j = kin::LAY.drivenBy[i];
+        const int j = lay::LAY.drivenBy[i];
         if (j < 0) continue;
-        const float dx = kin::LAY.g[i].cx - kin::LAY.g[j].cx;
-        const float dy = kin::LAY.g[i].cy - kin::LAY.g[j].cy;
+        const float dx = lay::LAY.g[i].cx - lay::LAY.g[j].cx;
+        const float dy = lay::LAY.g[i].cy - lay::LAY.g[j].cy;
         must(fabsf(sqrtf(dx*dx + dy*dy)
-                   - (kin::LAY.g[i].r + kin::LAY.g[j].r)) < 1e-3f,
+                   - (lay::LAY.g[i].r + lay::LAY.g[j].r)) < 1e-3f,
              "a mesh is not at its pitch-radius sum");
     }
     printf("layout %s:  G3 (%.3f, %.3f)  G4 (%.3f, %.3f)\n",
            g_layout_fails ? "FAILED" : "ok",
-           kin::LAY.g[2].cx, kin::LAY.g[2].cy,
-           kin::LAY.g[3].cx, kin::LAY.g[3].cy);
-    printf("blank zone: %.2f to %.2f deg   index: %.0f to %.0f deg\n",
-           kin::blank_zone_lo_deg(), kin::blank_zone_hi_deg(),
-           360.0f - kin::engage_half() * DEG, kin::engage_half() * DEG);
+           lay::LAY.g[2].cx, lay::LAY.g[2].cy,
+           lay::LAY.g[3].cx, lay::LAY.g[3].cy);
     printf("pitch %.6f   tail roller x %.6f   loop %.4f = %.1f pitches\n",
-           kin::pitch(), kin::tail_x(), kin::loop_len(),
-           kin::loop_len() / kin::pitch());
+           lay::pitch(), lay::tail_x(), lay::loop_len(),
+           lay::loop_len() / lay::pitch());
+    printf("pose: ram top %.4f   punch face %.4f   blank top %.4f\n",
+           lay::ram_top(), lay::punch_face(), BELT_TOP_Y + BLANK_H);
 }
 
 static void init() {
