@@ -2,10 +2,13 @@
 
 An automated stamping line in OpenGL — CSE 4207 Computer Graphics, KUET.
 
-> **Branch `unlit-demo`: no lighting and no shading.** Every part is drawn in a
-> flat colour, and a second pass outlines the geometry so the shapes still
-> read. This is the build for the modelling, transformation, animation and
-> viewing demo. Lighting, materials and the three shading modes are on `main`.
+> **Branch `static-objects`: the objects only, and nothing moves.** The machine
+> is held at one crank angle (`theta` = 90°) and drawn there; the clock that
+> advanced it is gone, so each mechanism can be pointed at and named while it
+> stands still. This branch is `unlit-demo` with the motion removed, so there is
+> no lighting or shading either — flat colours plus an edge pass. The running
+> machine is on `unlit-demo`; lighting, materials and the three shading modes
+> are on `main`.
 
 A motor drives a train of five meshing brass gears. The largest carries a crank,
 and a crank-slider drives a press ram over a conveyor. The last gear turns a
@@ -19,12 +22,22 @@ roll-up door, a workbench, pipework, ceiling beams), whose near walls drop away
 as the camera orbits. Two bulbs hang over the line, and the bulbs, the exhaust
 fan and the machine each have their own switch.
 
-**The technical claim:** the machine's entire animation state is one
-accumulating float (`theta`, the crankshaft angle) and one integer (`cycles`).
-Every motion it makes — five meshing gears, the press, the intermittent belt and
-the parts it carries — is a closed-form function of those two, evaluated in the
-render loop. No keyframes, no stored poses, no interpolation. (The room's fan
-has its own switch, so it keeps its own angle; it is the one exception.)
+**The technical claim, and what this branch shows about it:** the machine's
+entire animation state is one accumulating float (`theta`, the crankshaft
+angle) and one integer (`cycles`). Every motion it makes — five meshing gears,
+the press, the intermittent belt and the parts it carries — is a closed-form
+function of those two. No keyframes, no stored poses, no interpolation.
+
+Because of that, taking the animation out is not a rewrite: `theta` and
+`cycles` become two constants and the render loop stops advancing them. Every
+part is still placed by the same functions, so the line is caught mid-cycle
+rather than collapsed into a neutral pose. `src/config.h`, `src/kinematics.h`,
+`src/prim.h`, `src/materials.h`, `src/scene.h` and `src/room.h` are byte for
+byte the ones on `unlit-demo`; only `src/main.cpp` and this file differ.
+
+The pose is `theta` = 90°: the belt is locked between indexes, the ram is half
+way down its stroke and clear of the blanks, and the Geneva driver's pin is
+outside its slot.
 
 ## Build and run
 
@@ -41,56 +54,66 @@ or, from the MSYS2 shell: `make`, `make run`, `make check`, `make release`.
 
 ## Controls
 
+The camera is the only thing in this build that moves.
+
 | Key | Action |
 |---|---|
-| `Space` | machine on / off |
-| `[` `]` | left / right bulb on / off |
-| `f` | exhaust fan on / off (spins up and runs down) |
-| `h` | show / hide the technical readout |
-| `.` | while the machine is off, step `theta` forward 5° |
-| `↑` `↓` | speed ±6 ppm, range 6–120 (also `+` `-`, in every view) |
 | `←` `→` | orbit the camera |
 | `1` `2` `3` `4` | three-quarter / front elevation / top plan / whole room |
 | `c` | free camera on / off, starting from the current view |
 | free camera: `↑` `↓` `←` `→` | fly forward / back along the view, strafe left / right |
 | free camera: `PgUp` `PgDn` | rise / sink |
 | free camera: left-drag | look around |
+| `r` | put the camera back on view 1 |
+| `h` | show / hide the technical readout of the pose |
 | `e` | edge lines on / off |
 | `w` | wireframe |
-| `r` | reset to `theta` = 90°, `cycles` = 0 |
+| `Space` | machine switch — throws its lever and lights its lens; starts nothing |
+| `[` `]` | left / right bulb on / off |
+| `f` | exhaust fan switch — its lens lights, but the blades stay put |
 | `Esc` | quit |
+
+Gone with the animation: `.` (step the crank), `↑` `↓` and `+` `-` (line speed).
 
 ## What to demonstrate
 
-**1. The motion is computed, not authored.** Hold `↑` to 120 ppm and back. Every
-gear stays meshed, the press stays in step, and the belt still advances exactly
-one station per stroke — because belt travel is derived from `theta`, not from
-elapsed time. The interlock line in the readout (`h`) asserts, live, that belt travel is
-strictly constant whenever the punch is below the top of an unstamped blank.
+**1. The objects, view by view.** `1` is the three-quarter view of the whole
+line: the drive panel with its five gears on the left, the press above the
+conveyor, the conveyor running to the right, the head roller with the Geneva
+wheel, the chute and the bin. `2` puts the gear train and the press stack
+square to the camera. `3` looks down on the belt, the nine blanks along it and
+the stations they sit on. `4` pulls back to the workshop — walls, windows, the
+roll-up door, the bench, the pipework, the ceiling beams, the two hanging
+bulbs, the exhaust fan and the switch cabinet.
 
-**2. The interlock is derived, not chosen.** Switch the machine off with
-`Space` and step with `.`. The belt
-only moves during INDEX (315°–45°); the punch is inside the blank zone for
-132.03°–227.97°, a root computed in `kin::blank_zone_cos()` rather than typed in.
-Change the crank throw, the rod, the ram or the belt height and the window moves
-with them.
+**2. What the pose is showing.** At `theta` = 90° the ram is half way down and
+clear of the blanks, the belt is locked between indexes, and the Geneva driver's
+pin sits outside the slot. Every blank on the belt is drawn at the height its
+own station gives it, so the stamped ones downstream of the press are visibly
+flatter than the ones still waiting: station 7 is where the press works, and the
+squash is a volume-preserving scale, not a different model.
 
-**3. Temporal aliasing.** Set the speed nearest `fps / 0.6` and all five gears
-appear to stand still while the crank, ram and belt keep moving. They freeze at
-once because every gear in the train passes teeth at the same rate. The readout
-(`h`) prints the speed at which this happens for the current frame rate.
+**3. The gear train, standing still.** Each of the five gears sits exactly at
+the sum of its and its neighbour's pitch radius, and at every mesh a tooth on
+one gear faces a gap on the other — that half-tooth offset is `pi/N` in
+`kin::gear_angles()`, and without it the teeth would interpenetrate at rest.
+The teeth counts are 12:36:20:20:36 (`TEETH` in `config.h`); the readout (`h`)
+prints them. Brass and copper alternate along the train, so each mesh is
+between two colours.
 
-**4. The hierarchy, in wireframe (`w`).** Stop the machine with `Space` and
-step with `.`. The crank disc turns about its shaft, the rod follows the pin,
-and the ram slides between its rails. Every gear is a child of the drive panel,
-not of the gear that drives it: a child inherits its parent's rotation, but a
-meshing gear turns the other way at a different rate. The brass and copper
-alternate along the train, so each mesh is between two colours.
+**4. The hierarchy, in wireframe (`w`).** The crank disc sits on its shaft, the
+rod runs from the crank pin to the wrist pin, and the ram sits between its
+rails — a chain of `glPushMatrix` / `glTranslatef` / `glRotatef`, one child per
+level. Every gear is a child of the drive panel, not of the gear that drives
+it: a child would inherit its parent's rotation, but a meshing gear turns the
+other way at a different rate, so each gear's angle is computed and applied on
+its own.
 
 **5. Why the edges are there (`e`).** Without lighting, every face of a part is
 the same colour. Press `e`: the drive panel, the conveyor frame and the bin
-merge into one flat green shape, and a turning roller looks still. The edge
-pass draws the whole scene a second time as lines (`glPolygonMode(GL_LINE)`).
+merge into one flat green shape, and with nothing moving there is no other cue
+left to separate them. The edge pass draws the whole scene a second time as
+lines (`glPolygonMode(GL_LINE)`).
 Three details make it work:
 
 - `glPolygonOffset` pushes the faces back, so a line does not fight its own face in the depth buffer.
@@ -100,7 +123,19 @@ Three details make it work:
 **6. Viewing.** `1`–`4` are four `gluLookAt` presets, and `←` `→` orbit the
 eye about the look-at point. The walls between the camera and the machine
 disappear as it orbits. `c` hands the same eye to a free camera, whose view
-direction comes from a yaw and a pitch.
+direction comes from a yaw and a pitch, which is the way to get in close to one
+mechanism while talking about it.
+
+**7. The numbers behind the pose (`h`).** The readout is the pose's own
+figures, not a running log: the crank angle and its phase, the punch face
+height against the top of a blank and the clearance between them, the Geneva
+wheel's angle, belt travel in stations and how far through an index the line
+is. They are what `kinematics.h` returns for `theta` = 90°, and
+`build\mathcheck.exe` checks the same functions across the whole cycle.
+
+*For the line actually running — the gears turning, the press stroking, the belt
+indexing one station per stroke and the parts piling into the bin — check out
+`unlit-demo`.*
 
 ## Verification
 
@@ -214,6 +249,6 @@ plane, so this is composition, not collision.
 | `src/materials.h` | one flat colour per material, for the machine and the room |
 | `src/scene.h` | display lists and the per-frame hierarchy |
 | `src/room.h` | the cutaway workshop: walls, ceiling, bulbs and glow, cabinet switches, fan, counter |
-| `src/main.cpp` | GLUT glue, state and switches, input, HUD, the fill and edge passes |
+| `src/main.cpp` | GLUT glue, the fixed pose and the switches, input, HUD, the fill and edge passes |
 | `tests/mathcheck.cpp` | headless verification of PRD §10 |
 | `PRD.md` | the requirements document this implements |

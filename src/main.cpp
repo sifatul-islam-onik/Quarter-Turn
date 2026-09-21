@@ -1,13 +1,19 @@
 // "Quarter Turn" - an automated stamping line in OpenGL.
 //
-// The machine's entire animation state is one accumulating float and one
-// integer, and every motion it makes - five meshing gears, a press, an
-// intermittent belt and the parts it carries - is a closed-form function of
-// them, evaluated inside the render loop.  The room around it adds switches:
-// two bulbs, an exhaust fan with its own spin, and the machine itself.
+// STATIC BUILD - the objects only, with nothing in motion.  The machine is
+// held at one fixed crank angle, and every part of it - five meshing gears, a
+// press, an intermittent belt and the blanks it carries - is drawn at the pose
+// that one angle gives it.  Every other file - config.h, kinematics.h, prim.h,
+// materials.h, scene.h, room.h - is the animated build's, untouched; what is
+// gone is the clock that advanced the angle, so the scene can be pointed at
+// and explained part by part.
 //
-// There is no lighting in this build.  Every part is a flat colour, and a
-// second pass draws the same geometry as dark edge lines so the shapes still
+// Still live, because none of it is the machine moving: the camera (four
+// preset views, orbit and the free camera), the room's four switches, the
+// wireframe toggle and the edge pass.
+//
+// There is no lighting in this build either.  Every part is a flat colour, and
+// a second pass draws the same geometry as dark edge lines so the shapes still
 // read (see display()).
 //
 // GLEW must be included before freeglut, and glewInit() must run after
@@ -28,24 +34,28 @@
 using namespace cfg;
 
 // ---------------------------------------------------------------------------
-// Animation state.  PRD FR-2: exactly two variables.  Everything the machine
-// does is a pure function of these two plus the constants in config.h.
+// The pose.  In the animated build these two are the whole animation state
+// (PRD FR-2) and the render loop advances theta; here they are constants, so
+// every mechanism is drawn at one instant and stays there.
+//
+// 90 degrees is the angle that build resets to, and it is the clearest one to
+// stand on: the belt is stationary between indexes, the ram is half way down
+// its stroke well clear of the blanks, and the Geneva driver's pin is outside
+// its slot - so each mechanism is caught where it can be pointed at.
 // ---------------------------------------------------------------------------
-static float theta  = RESET_THETA_DEG * RAD;   // crankshaft angle, [0, 2pi)
-static long  cycles = 0;                       // monotonic, one per part
+static const float POSE_THETA = RESET_THETA_DEG * RAD;  // crank angle, radians
+static const long  POSE_CYCLE = 0;                      // parts finished so far
 
-static float ppm     = PPM_DEFAULT;            // one revolution is one part
-static bool  running = true;                   // the machine's switch
 static bool  wireframe = false;
-static float frame_ms = 0.0f;
 
-// The room's switches, independent of the machine and of each other.  The fan
-// has its own switch, so it cannot be geared to theta: its speed and angle are
-// the one piece of animation state outside FR-2's two variables.
+// The room's switches, independent of each other.  They still change what is
+// drawn - the lever's throw, its lens, the bulbs and their halos - but nothing
+// in this build moves over time, so the fan's blades hold still with its
+// switch on, at the one angle below.
+static bool  machine_on = true;                // the machine's own switch
 static bool  bulb_on[2] = { true, true };      // left, right
 static bool  fan_on  = true;
-static float fan_rps = FAN_RPS;                // lags the switch
-static float fan_deg = 0.0f;
+static const float FAN_DEG = 0.0f;             // the fan's fixed blade angle
 
 // Rendering state
 static bool edges   = true;                    // e: the edge-line pass
@@ -67,44 +77,6 @@ enum { MV_FWD = 0, MV_BACK, MV_LEFT, MV_RIGHT, MV_UP, MV_DOWN, MV_COUNT };
 static bool  held[MV_COUNT] = {};
 static bool  dragging = false;
 static int   drag_x = 0, drag_y = 0;
-
-// Live check of the PRD 7 acceptance criterion: belt travel must be strictly
-// constant in every frame in which the punch face is below the top of an
-// unstamped blank.  Reported on the HUD rather than hidden in an assert, so it
-// is checkable during the demo itself.
-static float last_B = 0.0f;
-static long  interlock_faults = 0;
-
-// ---------------------------------------------------------------------------
-// FR-1 - frame-rate-independent timing.  No motion uses a per-frame constant.
-// ---------------------------------------------------------------------------
-static void update(float dt) {
-    // The fan closes on its switch's speed with a first-order lag, so it spins
-    // up and runs down instead of jumping.  It runs with the machine stopped.
-    const float target = fan_on ? FAN_RPS : 0.0f;
-    fan_rps += (target - fan_rps) * (1.0f - expf(-dt / FAN_TAU));
-    fan_deg = fmodf(fan_deg + 360.0f * fan_rps * dt, 360.0f);
-
-    if (!running) return;
-    const float omega = ppm * 2.0f * PI / 60.0f;      // rad/s
-    theta += omega * dt;
-    // A while, not an if: `cycles` must increment exactly once per revolution
-    // because belt travel depends on it, and that stays true if PPM_MAX is
-    // ever raised (PRD FR-2).
-    while (theta >= 2.0f * PI) { theta -= 2.0f * PI; ++cycles; }
-}
-
-static void check_interlock() {
-    const float B = kin::belt_travel(theta, cycles);
-    if (kin::punch_face(theta) < BELT_TOP_Y + BLANK_H && B != last_B)
-        ++interlock_faults;
-    last_B = B;
-}
-
-static void step_theta(float deg) {
-    theta += deg * RAD;
-    while (theta >= 2.0f * PI) { theta -= 2.0f * PI; ++cycles; }
-}
 
 // ---------------------------------------------------------------------------
 // Camera
@@ -215,7 +187,7 @@ static void fly(float dt) {
 
 // The four switches, in the cabinet's order (room::Switch).
 static void switch_flags(bool* sw) {
-    sw[room::SW_MACHINE] = running;
+    sw[room::SW_MACHINE] = machine_on;
     sw[room::SW_BULB_L]  = bulb_on[0];
     sw[room::SW_BULB_R]  = bulb_on[1];
     sw[room::SW_FAN]     = fan_on;
@@ -286,17 +258,20 @@ static void status_panel(float& bottom) {
 
     const float x0 = 12.0f, x1 = x0 + 236.0f, pad = 12.0f, row = 20.0f;
     const float top = (float)win_h - 12.0f;
-    const int extra = (wireframe ? 1 : 0) + (edges ? 0 : 1)
-                    + (interlock_faults ? 1 : 0);
-    const float y_title = top - pad - 10.0f;
-    const float y_sw0   = y_title - 8.0f - row;
-    const float y_speed = y_sw0 - (room::SW_COUNT - 1) * row - 8.0f - row;
-    const float y_last  = y_speed - (1 + extra) * row;
+    const int extra = (wireframe ? 1 : 0) + (edges ? 0 : 1);
+    const float y_title   = top - pad - 10.0f;
+    const float y_sub     = y_title - 15.0f;
+    const float y_sw0     = y_sub - 8.0f - row;
+    const float y_sw_last = y_sw0 - (room::SW_COUNT - 1) * row;
+    const float y_extra0  = y_sw_last - 8.0f - row;
+    const float y_last    = extra ? y_extra0 - (extra - 1) * row : y_sw_last;
     bottom = y_last - pad + 2.0f;
     backing(x0, bottom, x1, top);
 
     glColor3f(0.96f, 0.96f, 0.94f);
     text(x0 + pad, y_title, "QUARTER TURN");
+    glColor3f(0.56f, 0.58f, 0.62f);
+    text(x0 + pad, y_sub, "objects only - nothing moves");
 
     for (int k = 0; k < room::SW_COUNT; ++k) {
         const float y = y_sw0 - k * row;
@@ -304,24 +279,14 @@ static void status_panel(float& bottom) {
         status_row(x0, x1, y, LABEL[k], sw[k] ? "ON" : "OFF", sw[k], KEY[k]);
     }
 
-    char b[64];
-    float y = y_speed;
-    snprintf(b, sizeof b, "%.0f ppm", ppm);
-    status_row(x0, x1, y, "Speed", b, true, free_cam ? "+ -" : "up/dn"); y -= row;
-    snprintf(b, sizeof b, "%ld", kin::parts_made(theta, cycles));
-    status_row(x0, x1, y, "Parts", b, true, "");              y -= row;
     // Non-default render states get a row only while they are on.
+    float y = y_extra0;
     if (wireframe) { status_row(x0, x1, y, "Wireframe", "ON", true, "w"); y -= row; }
     if (!edges)    { status_row(x0, x1, y, "Edges", "OFF", true, "e");    y -= row; }
-    if (interlock_faults) {
-        snprintf(b, sizeof b, "x%ld", interlock_faults);
-        glColor3f(1.0f, 0.35f, 0.25f);
-        text(x0 + pad + 14.0f, y, "INTERLOCK FAULT");
-        text_right(x1 - pad - 44.0f, y, b);
-    }
 }
 
-// The technical readout the README's demonstrations refer to, behind `h`.
+// The technical readout the README's walk-through refers to, behind `h`: the
+// numbers behind the pose on screen, all of them constant in this build.
 static void details_panel(float top) {
     struct Line { float r, g, b; char s[160]; };
     Line L[10];
@@ -331,35 +296,26 @@ static void details_panel(float top) {
         return L[n++].s;
     };
 
-    const kin::Phase ph = kin::phase_of(theta);
-    const float B  = kin::belt_travel(theta, cycles);
-    const float pf = kin::punch_face(theta);
-    const float h7 = kin::press_blank_h(theta);
-    const float fps = frame_ms > 0.0f ? 1000.0f / frame_ms : 0.0f;
+    const kin::Phase ph = kin::phase_of(POSE_THETA);
+    const float B  = kin::belt_travel(POSE_THETA, POSE_CYCLE);
+    const float pf = kin::punch_face(POSE_THETA);
+    const float h7 = kin::press_blank_h(POSE_THETA);
 
-    snprintf(add(0.95f, 0.95f, 0.90f), 160, "theta %6.1f deg  %-8s  %s",
-             theta * DEG, kin::phase_name(ph),
-             kin::belt_locked(ph) ? "belt locked" : "belt moving");
+    snprintf(add(0.95f, 0.95f, 0.90f), 160, "theta %6.1f deg (held)  %-8s  %s",
+             POSE_THETA * DEG, kin::phase_name(ph),
+             kin::belt_locked(ph) ? "belt locked" : "belt free");
     snprintf(add(0.80f, 0.86f, 0.95f), 160,
              "punch face %.3f  blank top %.3f  clearance %+.3f",
              pf, BELT_TOP_Y + h7, pf - (BELT_TOP_Y + h7));
     snprintf(add(0.80f, 0.86f, 0.95f), 160,
              "Geneva %7.2f deg  belt %.4f stations  index %.3f",
-             kin::wheel_angle_deg(B), B, kin::index_progress(theta));
+             kin::wheel_angle_deg(B), B, kin::index_progress(POSE_THETA));
     snprintf(add(0.80f, 0.86f, 0.95f), 160,
-             "motor %.0f rpm  %5.1f fps  gears freeze near %.0f ppm",
-             ppm * 3.0f, fps, fps / 0.6f);
-
-    if (interlock_faults)
-        snprintf(add(1.0f, 0.3f, 0.2f), 160,
-                 "INTERLOCK FAULT x%ld - belt moved under the punch",
-                 interlock_faults);
-    else
-        snprintf(add(0.45f, 0.75f, 0.45f), 160,
-                 "interlock ok - belt still while the punch is in the blank zone");
+             "teeth %d:%d:%d:%d:%d   one turn of the crank is one part",
+             TEETH[0], TEETH[1], TEETH[2], TEETH[3], TEETH[4]);
 
     snprintf(add(0.50f, 0.52f, 0.56f), 160,
-             ". step 5 deg (stopped)   w wireframe   e edges");
+             "static build - the crank does not turn   w wireframe   e edges");
 
     const float x0 = 12.0f, pad = 12.0f, row = 17.0f;
     float w = 0.0f;
@@ -377,10 +333,10 @@ static void details_panel(float top) {
 static void key_hint() {
     static const char* VIEW[][2] = { { "h", "details" }, { "1-4", "view" },
                                      { "c", "free camera" },
-                                     { "arrows", "orbit, speed" },
-                                     { "r", "reset" }, { "esc", "quit" } };
+                                     { "left right", "orbit" },
+                                     { "r", "reset view" }, { "esc", "quit" } };
     static const char* FREE[][2] = { { "arrows", "fly" }, { "pgup pgdn", "rise, sink" },
-                                     { "drag", "look" }, { "+ -", "speed" },
+                                     { "drag", "look" },
                                      { "c", "exit free camera" }, { "esc", "quit" } };
     const char* (*K)[2] = free_cam ? FREE : VIEW;
     const int n = free_cam ? (int)(sizeof FREE / sizeof FREE[0])
@@ -421,8 +377,8 @@ static void hud() {
 // GLUT callbacks
 // ---------------------------------------------------------------------------
 static void draw_world(const bool* sw, bool edge_pass = false) {
-    scene::draw(theta, cycles);
-    room::draw(eye_pos, theta, cycles, fan_deg, sw, edge_pass);
+    scene::draw(POSE_THETA, POSE_CYCLE);
+    room::draw(eye_pos, POSE_THETA, POSE_CYCLE, FAN_DEG, sw, edge_pass);
 }
 
 // An edge pixel keeps this fraction of the face colour under it.
@@ -493,24 +449,24 @@ static void reshape(int w, int h) {
     apply_projection();
 }
 
+// The scene is fixed, so the only thing left with a speed is the free camera,
+// and it still flies speed * dt (FR-1) rather than a step per frame.
 static void idle() {
     static int prev = 0;
     const int now = glutGet(GLUT_ELAPSED_TIME);
     float dt = prev ? (now - prev) * 0.001f : 0.0f;   // first frame: dt = 0
     prev = now;
-    frame_ms = dt * 1000.0f;
-    if (dt > DT_CLAMP) dt = DT_CLAMP;   // a window drag must not skip a phase
-    update(dt);
+    if (dt > DT_CLAMP) dt = DT_CLAMP;   // a window drag must not jump the camera
     fly(dt);
-    check_interlock();
     glutPostRedisplay();
 }
 
 static void keyboard(unsigned char k, int, int) {
     switch (k) {
     case 27: glutLeaveMainLoop(); break;
-    case ' ': running = !running; break;                  // machine switch
-    case '.': if (!running) step_theta(STEP_DEG); break;   // forward only
+    // The machine switch throws its lever and lights its lens like the other
+    // three; with the clock gone it starts nothing.
+    case ' ': machine_on = !machine_on; break;
     case 'w': case 'W': wireframe = !wireframe; break;
     case 'e': case 'E': edges = !edges; break;
     case '[': case '{': case ']': case '}': {             // bulb switches
@@ -525,12 +481,10 @@ static void keyboard(unsigned char k, int, int) {
         set_free_cam(false);
         break;
     case 'c': case 'C': set_free_cam(!free_cam); break;
-    // Speed on + and - too, in every view: the free camera flies on the arrows.
-    case '+': case '=': ppm = fminf(PPM_MAX, ppm + PPM_STEP); break;
-    case '-': case '_': ppm = fmaxf(PPM_MIN, ppm - PPM_STEP); break;
+    // Nothing about the scene to reset, so r puts the camera back instead.
     case 'r': case 'R':
-        theta = RESET_THETA_DEG * RAD; cycles = 0;
-        interlock_faults = 0; last_B = kin::belt_travel(theta, cycles);
+        preset = 1; orbit = 0.0f;
+        set_free_cam(false);
         break;
     default: break;
     }
@@ -553,9 +507,7 @@ static void hold(int k, bool down) {
 static void special(int k, int, int) {
     hold(k, true);
     if (free_cam) return;                       // the arrows fly instead
-    switch (k) {
-    case GLUT_KEY_UP:    ppm = fminf(PPM_MAX, ppm + PPM_STEP); break;
-    case GLUT_KEY_DOWN:  ppm = fmaxf(PPM_MIN, ppm - PPM_STEP); break;
+    switch (k) {                                // up and down had the speed
     case GLUT_KEY_LEFT:  orbit -= 3.0f; break;
     case GLUT_KEY_RIGHT: orbit += 3.0f; break;
     default: break;
@@ -630,7 +582,6 @@ static void init() {
 
     scene::build_lists();
     room::build_lists();        // after: it calls the machine's gear and blank lists
-    last_B = kin::belt_travel(theta, cycles);
 }
 
 int main(int argc, char** argv) {
@@ -639,7 +590,7 @@ int main(int argc, char** argv) {
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(win_w, win_h);
-    glutCreateWindow("Quarter Turn - an automated stamping line");
+    glutCreateWindow("Quarter Turn - static scene, objects only");
 
     const GLenum err = glewInit();
     if (err != GLEW_OK) {
