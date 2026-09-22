@@ -1,13 +1,7 @@
-// materials.h - one flat colour per material.
-//
-// This build draws without lighting, so a material is nothing more than the
-// colour glColor paints a part with, and every face of a part is the same
-// colour.  What keeps the shapes readable is the edge pass in main.cpp, not
-// anything here.
 #ifndef MATERIALS_H
 #define MATERIALS_H
 
-#include <GL/glew.h>
+#include <GL/freeglut.h>
 
 namespace mat {
 
@@ -15,29 +9,19 @@ struct Material {
     GLfloat rgb[3];
 };
 
-// glColor is recorded into a display list like any other call, so a part's
-// colour can be baked into its list.  A colour that changes at runtime - the
-// stack light, the counter, a bulb - must be set outside the list, immediately
-// before calling it (PRD FR-15).
 inline void use(const Material& m) { glColor3fv(m.rgb); }
 
-// --- the machine -----------------------------------------------------------
-
-// Polished steel: blanks, shafts, crank disc and pins, rollers.
 constexpr Material SILVER        = { { 0.80f, 0.82f, 0.85f } };
-// The rod and the ram, darker so the crank-slider linkage reads against the
-// polished disc and the blank under it.
+
 constexpr Material DARK_STEEL    = { { 0.46f, 0.50f, 0.56f } };
-// The gear train alternates brass and copper, so every mesh is between two
-// colours and each pair of gears visibly turns in opposite directions.
+
 constexpr Material BRASS         = { { 0.88f, 0.68f, 0.20f } };
 constexpr Material COPPER        = { { 0.78f, 0.42f, 0.20f } };
 // Motor body, magazine, exit hood, stack-light housing.
 constexpr Material BLACK_PLASTIC = { { 0.20f, 0.21f, 0.23f } };
-// Drive panel, conveyor frame, guide rails, chute, bin.
+// Drive panel, conveyor frame, guide rails.
 constexpr Material MACHINE_PAINT = { { 0.26f, 0.48f, 0.36f } };
-// The belt.  A uniform strip that moves looks identical to one that does not,
-// so the belt's motion is carried by its cleats, in SAFETY_YELLOW.
+
 constexpr Material RUBBER        = { { 0.14f, 0.14f, 0.15f } };
 constexpr Material CONCRETE      = { { 0.52f, 0.51f, 0.48f } };
 
@@ -52,7 +36,7 @@ constexpr Material WINDOW_GLASS  = { { 0.62f, 0.76f, 0.90f } };   // daylight
 constexpr Material BULB_ON       = { { 1.00f, 0.95f, 0.78f } };
 constexpr Material BULB_OFF      = { { 0.34f, 0.35f, 0.37f } };
 
-// A lamp lens - the stack light, the counter's segments, the switch lamps:
+// A lamp lens - the stack light and the switch lamps:
 // its full colour when lit, a dim version of it when not.
 inline Material lens(float r, float g, float b, bool lit) {
     const float k = lit ? 1.0f : 0.25f, d = lit ? 0.0f : 0.04f;

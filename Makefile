@@ -1,7 +1,7 @@
 # Makefile - for the MSYS2 MinGW64 shell.  Windows users: prefer .\build.ps1
 CXX      := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O0 -g
-LDLIBS   := -lglew32 -lfreeglut -lopengl32 -lglu32
+LDLIBS   := -lfreeglut -lopengl32 -lglu32
 HDRS     := $(wildcard src/*.h)
 SRC      := src/main.cpp
 OUT      := build/quarterturn.exe
