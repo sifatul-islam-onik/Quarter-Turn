@@ -78,6 +78,15 @@ OpenGL 1.1, so there is no GLEW and no extension loader.
 
 or, from the MSYS2 shell: `make`, `make run`, `make release`.
 
+## Documentation
+
+| Document | What it is for |
+|---|---|
+| [docs/OBJECTS.md](docs/OBJECTS.md) | every object: what it is built from, and whether each number was **typed**, **derived** or **solved**. Has every formula in one page, and a list of which numbers are safe to change and which are coupled. |
+| [docs/DEMO-CHANGES.md](docs/DEMO-CHANGES.md) | changing things live: moving an object, reshaping one, colours, speed, lighting, adding a new object, and the five things that bite. |
+| [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) | the long-form original. **Describes `unlit-demo`** — its derivations still hold, its file and line references do not. Its header lists the differences. |
+| [docs/PROPOSAL.md](docs/PROPOSAL.md) | the original project proposal. |
+
 ## Controls
 
 
@@ -268,3 +277,5 @@ pass under it. The code for the exit is on `unlit-demo` and `main`.
 | `src/hud.h` | the switch panel and the key hint |
 | `src/main.cpp` | GLUT glue, the clock, the light rig, input, the fill and edge passes |
 | `PRD.md` | the requirements document this implements |
+| `docs/OBJECTS.md` | every object and where its numbers came from |
+| `docs/DEMO-CHANGES.md` | how to change things during a demonstration |

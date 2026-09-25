@@ -1,7 +1,35 @@
 # Quarter Turn — how it works
 
 **An automated stamping line in OpenGL.** CSE 4207 Computer Graphics, KUET.
-This document describes the `unlit-demo` build: no lighting and no shading. Every part is a flat colour, outlined by a second drawing pass.
+
+> ## Which branch this describes
+>
+> **This document describes `unlit-demo`, not the branch you are on.** It is
+> kept because its *derivations* are the originals and are still correct —
+> the crank-slider law (§8.6), the Geneva β(α) (§8.7), belt travel (§8.9) and
+> the idler placement (§8.4) are the same mathematics `static-objects` runs
+> today.
+>
+> **What does not carry over.** Every `kinematics.h:NNN` and `scene.h:NNN`
+> link below is dead here: `kinematics.h` was replaced by
+> [layout.h](../src/layout.h), and the single large `scene.h` was split into
+> one file per mechanism (`gears.h`, `press.h`, `geneva.h`, `conveyor.h`,
+> `blanks.h`, `fixtures.h`). Also different on `static-objects`:
+>
+> | §  | Says | Actually, here |
+> |---|---|---|
+> | Tools | GLEW for `glBlendColor` | no GLEW; nothing calls past OpenGL 1.1 |
+> | §2 | `verify_layout()`, `glewInit()` at startup | neither exists |
+> | §5 | `grid`, `grid_xz`, `plate_z`, `slab_x`, `lathe`, `extrude_strip` | six primitives only: `box`, `box_span`, `cyl`, `cyl_z`, `tiles_y`, `tiles_z` |
+> | §6 | "Drawing without lighting" | there **is** lighting: two point lights, ambient, Lambert diffuse |
+> | §6.3 | `GL_ZERO, GL_CONSTANT_COLOR` + `glBlendColor` | `GL_ZERO, GL_SRC_COLOR` — each edge is its face's colour squared |
+> | §4 | `cycles` | called `turns` |
+> | §8 | chute, bin, flying parts, bin pile, phases, parts counter | none of these are in this build |
+> | §13 | `tests/mathcheck.cpp` | not on this branch |
+>
+> **For this branch, read [OBJECTS.md](OBJECTS.md)** — every object, its
+> primitives, and whether each number was typed, derived or solved — and
+> **[DEMO-CHANGES.md](DEMO-CHANGES.md)** for changing things live.
 
 It explains how the project was built, where every object is coded, the formula behind every motion and where each formula comes from.
 
