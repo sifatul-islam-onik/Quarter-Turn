@@ -6,8 +6,10 @@
 
 namespace scene {
 
+inline GLuint panel_list;      // drive panel, guide rails, brackets
+
 inline void build_press() {
-    glNewList(L(L_PANEL), GL_COMPILE);
+    panel_list = new_list();
     mat::use(mat::MACHINE_PAINT);
     glPushMatrix();
     glTranslatef(PANEL_CX, PANEL_CY, PANEL_CZ);

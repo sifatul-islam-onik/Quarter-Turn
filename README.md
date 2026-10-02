@@ -1,27 +1,27 @@
-| `src/prim.h` | the one box routine and one cylinder routine |
-| `src/materials.h` | one flat colour per material, for the machine and the room |
-| `src/common.h` | the display-list registry |
+| `src/prim.h` | the box and cylinder routines, and `new_list()` for display lists |
+| `src/materials.h` | colour, specular and exponent per material; `glow()` for emission |
+| `src/common.h` | the includes every machine file shares |
 | `src/gears.h` | the five-gear train (FR-3) |
 | `src/press.h` | the drive panel and the crank-slider press (FR-4) |
 | `src/geneva.h` | the driver arm and the four-slot wheel (FR-5) |
 | `src/conveyor.h` | frame, rollers, belt, cleats (FR-6) |
 | `src/blanks.h` | the workpieces and the squash (FR-7) |
-| `src/fixtures.h` | floor, motor, magazine, exit hood, stack light |
+| `src/fixtures.h` | floor, motor, stack light |
 | `src/scene.h` | assembles those six into the machine: build order, draw order |
-| `src/room.h` | the cutaway workshop: walls, ceiling, bulbs, cabinet switches, fan |
+| `src/room.h` | the cutaway workshop: walls, windows, beams, lamps, pallets, drums, cabinet switches, fan |
 | `src/camera.h` | two preset views, orbit, the level free camera |
 | `src/hud.h` | the switch panel and the key hint |
-| `src/main.cpp` | GLUT glue, the clock, the light rig, input, the fill and edge passes |
+| `src/shading.h` | flat, Gouraud and the per-pixel Phong program (GLSL 1.10) |
+| `src/main.cpp` | GLUT glue, GLEW, the clock, the spotlights, input, the fill and edge passes |
 # Quarter Turn
 
 An automated stamping line in OpenGL — CSE 4207 Computer Graphics, KUET.
 
 > **Branch `static-objects`: the minimal build.** The machine runs and the room
 > is lit, both in the smallest form that is still correct. The whole machine is
-> a function of one angle; the lighting is two lamps, an ambient floor and
-> Lambert diffuse shading, with no specular term and no shader. `main` carries
-> the full version: per-part materials, a specular rig and three shading modes
-> including a GLSL Phong program.
+> a function of one angle; the lighting is the slides' Phong reflection model
+> (ambient, diffuse, specular, emission) from two attenuated spotlights, shaded
+> flat, Gouraud or per-pixel Phong (a small GLSL program).
 >
 > The branch name is now a misnomer — it started as the objects on their own.
 
@@ -29,9 +29,9 @@ A motor drives a train of five meshing brass gears. The largest carries a crank,
 and a crank-slider drives a press ram over a conveyor. The last gear turns a
 Geneva mechanism on the conveyor's head roller, converting continuous rotation
 into exactly one quarter turn of the roller followed by a locked pause. Each
-quarter turn advances the belt one station: blanks drop from a magazine, ride the
-belt, stop under the press, are flattened while the belt is locked, pass under
-an exit hood, and leave at the head roller. The line stands in a cutaway
+quarter turn advances the belt one station: blanks enter at the tail end, ride
+the belt, stop under the press, are flattened while the belt is locked, and
+leave at the head roller. The line stands in a cutaway
 workshop (walls, windows, ceiling
 beams), whose near walls drop away as the camera orbits. Two bulbs hang over
 the line, and the bulbs, the exhaust fan and the machine each have their own
@@ -59,16 +59,33 @@ at the top, then the ram comes down on a blank the Geneva lock is holding still.
 
 **How it is lit.** Each hanging bulb is one positional `GL_LIGHT`, switched by
 the same flag that draws its glass lit or dark, over an ambient floor that
-keeps the far corners off black. There is no specular term, so there is no
-shininess to tune and no material to carry: `GL_COLOR_MATERIAL` turns the
-`glColor3fv` already in every display list into that part's ambient and diffuse
-colour, so not one part needed a material. Shading is Lambert diffuse and
-nothing more.
+keeps the far corners off black. Each is a spotlight pointing straight down,
+cut off at 90° by its flat shade and fading as `cos^0.5` towards that edge, so
+nothing above a bulb is lit by it and the upper walls and the ceiling get the
+ambient light alone. Its
+light is also divided by `a0 + a1·d + a2·d²` with distance, so the walls far
+from a bulb get less of it than the machine under it. A material
+(`materials.h`) is a colour plus the
+specular colour `ks` and exponent `ns`; brass, polished silver, copper and
+black plastic take theirs from the slides' coefficient table.
+`GL_COLOR_MATERIAL` turns the colour into ambient and diffuse, and
+`glMaterial` sets the specular term. Lit bulbs, lamp lenses and window
+daylight use the emission term instead (`mat::glow`), so they shine whatever
+the lamps do.
+
+**How it is shaded** (`s`, `shading.h`). Flat and Gouraud are the fixed
+pipeline, which lights each vertex. Phong, the default, is a GLSL 1.10 program
+that passes the normal to every pixel and lights it there. It works out the
+same equation from the same lights and materials (`gl_LightSource`,
+`gl_FrontMaterial`), so switching modes changes only *where* the lighting is
+worked out. The difference shows where light changes inside one face: the
+spotlight's edge crossing a wall tile, or a highlight on the drive panel.
 
 ## Build and run
 
-Requires MSYS2 MinGW64 with `freeglut`. Nothing here calls past
-OpenGL 1.1, so there is no GLEW and no extension loader.
+Requires MSYS2 MinGW64 with `freeglut` and `glew`. Windows' `opengl32.dll`
+stops at OpenGL 1.1; GLEW finds the OpenGL 2.0 shader functions in the driver.
+Without OpenGL 2.0 the program is skipped and `s` cycles flat and Gouraud only.
 
 ```powershell
 .\build.ps1          # build
@@ -100,6 +117,7 @@ or, from the MSYS2 shell: `make`, `make run`, `make release`.
 | free camera: `PgUp` `PgDn` | rise / sink |
 | `r` | reset: crank back to the start, camera back on view 1 |
 | `e` | edge lines on / off |
+| `s` | shading: flat → Gouraud → Phong (per pixel) |
 | `Space` | machine switch — starts and stops the line |
 | `[` `]` | left / right bulb on / off |
 | `f` | exhaust fan switch |
@@ -182,16 +200,17 @@ blank's height, and the punch never comes down while the belt is indexing.
 
 Each is in the source next to the number it changes.
 
-**No lighting on this branch.** A material is one flat colour set with
-`glColor` (`materials.h`), recorded into the display lists like any other call.
-The consequences:
+**Coarse geometry, made for the edge pass.** A material is a colour set with
+`glColor`, plus `ks` and `ns` set with `glMaterial` (`materials.h`), recorded
+into the display lists like any other call. The geometry is kept coarse
+because the edge pass outlines every face. That suits Phong, which lights per
+pixel, but not Gouraud, which lights per vertex. The consequences:
 
-- No surface carries a normal: `glNormal` does nothing with lighting off, so the primitives drop it entirely (`prim.h`).
-- The surfaces that were split into cells for per-vertex lighting are plain boxes now (the drive panel, the belt strip). The exception is the floor, which is kept as 1.0 tiles because the tiles show the floor receding in perspective (`config.h`).
+- The drive panel and the belt strip are plain boxes, so their faces have only four vertices. Under Gouraud a highlight that lands on one corner smears across the whole face, which is why the machine paint is semi-gloss (`ks` 0.10). The floor, walls and ceiling are 1.0 tiles, so even under Gouraud the light falls off across them, though the fade at the spotlight's edge is smeared over a whole row of tiles (`config.h`).
 - Cylinder caps are one `GL_POLYGON` instead of a triangle fan, so outlined they show a rim, not spokes (`prim.h`).
-- Every object is a box or a cylinder (`prim.h` has `box`, `cyl` and `grid` and nothing else), and every cylinder has the same `CYL_SLICES` sides. The Geneva wheel is a hub with four box arms, and the gaps between them are its four slots. Gear teeth are sunk `TOOTH_SINK` into their body so a coarse body still carries them.
+- Every object is a box or a cylinder (`prim.h` has `box`, `cyl` and the two tile grids and nothing else), and every cylinder has the same `CYL_SLICES` sides. The Geneva wheel is a hub with four box arms, and the gaps between them are its four slots. Gear teeth are sunk `TOOTH_SINK` into their body so a coarse body still carries them.
 - The rod and ram are darker steel, the gears alternate brass and copper, and the cleats are yellow, so parts that meet do not share a colour.
-- The bulbs change colour with their switches but light nothing, and the window glass is a pale daylight colour.
+- Brass, copper, polished silver and black plastic take `ks` and `ns` from the slides' table, but keep this branch's brighter colours for ambient and diffuse. The slide's silver diffuse is 0.28, which would make the blanks almost black away from a highlight.
 
 **Cylinder ends are square** (`prim.h`, `cyl()`). Earlier builds broke them with
 a 45° chamfer, as real stamped parts have; unlit and outlined it cost two extra
@@ -212,9 +231,13 @@ the slot walls being exact.
 **The rail bracket is two arms**, one per guide rail (`press.h`), so the ram
 passes between them instead of through them.
 
-**Two hanging bulbs** (`config.h`, `room.h`). Each is a cylinder of glass on a
-flex, going bright or dim with its own switch. They hang either side of the
-press, 1.0 in front of the belt and 2.4 above it.
+**Two hanging bulbs** (`config.h`, `room.h`). Each is a cylinder of glass under
+a metal shade on a flex, glowing (emission) or dark glass with its own switch.
+They hang either side of the press, 1.0 in front of the belt and 3.6 above it.
+Each is a spotlight whose cone matches its shade, so the upper walls and the
+ceiling get the ambient light alone. They hang that high because a spot cone
+cannot be wider than 90°: lower, the cone would miss G1 and the motor, which
+stand above the old bulb height of 5.4.
 
 **A switch panel and a minimal HUD** (`main.cpp`, `room.h`). The machine, each
 bulb and the fan have their own switch, each a status lamp on the electrical
@@ -238,44 +261,52 @@ switches the near plane from 4.0 to 0.2 while it is on, and far/near becomes
 height of 20. Every room corner then stays within a depth of 36.5, and a 24-bit
 depth step there is 0.0004, so the hazard marks, 0.004 above the floor, stay
 about ten steps clear. It moves at speed × `dt` from held keys, not on key
-repeat, so it is frame-rate independent — on this branch it is the only thing
-left that moves at all. Walls hide the same way as in the presets: fly out
+repeat, so it is frame-rate independent, like the machine. Walls hide the same way as in the presets: fly out
 through a wall and it disappears.
 - The **floor grows** to the room, in 1.0 tiles (15 × 8).
 - **Eight room colours** are added (wall paint, safety yellow, wood, signal
   red, galvanized steel, window glass, and a bulb lit and unlit).
-- The **fan** stands at one blade angle; its switch still throws and its lamp
-  still lights, but there is no spin to start.
-- The spare gears on the shelf and the pallet's blanks call the machine's own
-  display lists, so they are exactly the parts they stand in for.
+- The **fan** keeps its own angle, off the machine's clock, and spins while its
+  switch is on.
+- **Build once, draw many.** A window, an I-beam, a pendant lamp, a pallet and
+  a drum are each one display list, drawn nine, five, two, two and two times.
+  The drum list sets no colour, so each copy is coloured just before its call.
+- The spare gears on the shelf and the blanks on both pallets use the
+  machine's own lists and its `draw_blank()`, so they are exactly the parts
+  they stand in for. The stamped pallet's blanks get the same squash as those
+  on the belt.
 
 **No discharge chute and no collection bin.** On the animated branches a
 finished part rides over the head roller, is tossed onto a chute, slides down
 and drops into a bin that piles 36. The belt here recycles its blanks along the
 top run rather than carrying them over the roller, so both stood empty for the
-whole run and have been taken out. The exit hood stays, because a blank does
-pass under it. The code for the exit is on `unlit-demo` and `main`.
+whole run and have been taken out. The code for the exit is on `unlit-demo`
+and `main`.
+
+**No feed magazine and no exit hood.** Both were plain black plates over the
+belt that did nothing to the blanks, so they have been taken out.
 
 ## Files
 
 | File | Contents |
 |---|---|
-| `src/config.h` | every tunable number, PRD-section referenced |
+| `src/config.h` | every number, one section per object, each tagged `[free]` or `[coupled]` |
 | `src/layout.h` | where every part stands — no OpenGL, no time, evaluated once |
-| `src/prim.h` | the one box routine and one cylinder routine |
-| `src/materials.h` | one flat colour per material, for the machine and the room |
-| `src/common.h` | the display-list registry |
+| `src/prim.h` | the box and cylinder routines, and `new_list()` for display lists |
+| `src/materials.h` | colour, specular and exponent per material; `glow()` for emission |
+| `src/common.h` | the includes every machine file shares |
 | `src/gears.h` | the five-gear train (FR-3) |
 | `src/press.h` | the drive panel and the crank-slider press (FR-4) |
 | `src/geneva.h` | the driver arm and the four-slot wheel (FR-5) |
 | `src/conveyor.h` | frame, rollers, belt, cleats (FR-6) |
 | `src/blanks.h` | the workpieces and the squash (FR-7) |
-| `src/fixtures.h` | floor, motor, magazine, exit hood, stack light |
+| `src/fixtures.h` | floor, motor, stack light |
 | `src/scene.h` | assembles those six into the machine: build order, draw order |
-| `src/room.h` | the cutaway workshop: walls, ceiling, bulbs, cabinet switches, fan |
+| `src/room.h` | the cutaway workshop: walls, windows, beams, lamps, pallets, drums, cabinet switches, fan |
 | `src/camera.h` | two preset views, orbit, the level free camera |
 | `src/hud.h` | the switch panel and the key hint |
-| `src/main.cpp` | GLUT glue, the clock, the light rig, input, the fill and edge passes |
+| `src/shading.h` | flat, Gouraud and the per-pixel Phong program (GLSL 1.10) |
+| `src/main.cpp` | GLUT glue, GLEW, the clock, the spotlights, input, the fill and edge passes |
 | `PRD.md` | the requirements document this implements |
 | `docs/OBJECTS.md` | every object and where its numbers came from |
 | `docs/DEMO-CHANGES.md` | how to change things during a demonstration |

@@ -1,4 +1,5 @@
 
+#include <GL/glew.h>        // first: it must come before any other GL header
 #include <GL/freeglut.h>
 
 #include <cstdlib>
@@ -11,45 +12,44 @@
 #include "room.h"
 #include "camera.h"
 #include "hud.h"
+#include "shading.h"
 
 using namespace cfg;
 
-static float theta   = lay::START_DEG * RAD;   // radians
+static float theta   = lay::ENGAGE_DEG * RAD;  // radians; just after an index
 static long  turns   = 0;                      // whole revolutions so far
 static float fan_deg = 0.0f;                   // the one part off the clock
 
-static bool  machine_on = true;                // the machine's own switch
-static bool  bulb_on[2] = { true, true };      // left, right
-static bool  fan_on     = true;
+// The four switches, in the cabinet's order: machine, left bulb, right bulb, fan.
+static bool sw[room::SW_COUNT] = { true, true, true, true };
 
 static bool edges = true;                      // e: the edge-line pass
-
-// The four switches, in the cabinet's order (room::Switch).
-static void switch_flags(bool* sw) {
-    sw[room::SW_MACHINE] = machine_on;
-    sw[room::SW_BULB_L]  = bulb_on[0];
-    sw[room::SW_BULB_R]  = bulb_on[1];
-    sw[room::SW_FAN]     = fan_on;
-}
+static shade::Mode mode = shade::PHONG;        // s: flat, Gouraud, Phong
 
 
-static void draw_world(const bool* sw, bool edge_pass = false) {
+static void draw_world(bool edge_pass = false) {
     scene::draw(theta, turns);
     room::draw(cam::eye_pos, sw, fan_deg, edge_pass);
 }
 
 
-static const GLfloat BULB_DIFFUSE[4] = { 0.60f, 0.57f, 0.50f, 1.0f };
-static const GLfloat LIGHT_OFF[4]    = { 0.00f, 0.00f, 0.00f, 1.0f };
-static const GLfloat ROOM_AMBIENT[4] = { 0.44f, 0.44f, 0.47f, 1.0f };
+static const GLfloat BULB_DIFFUSE[4]  = { 0.85f, 0.80f, 0.70f, 1.0f };
+static const GLfloat BULB_SPECULAR[4] = { 0.90f, 0.88f, 0.82f, 1.0f };
+static const GLfloat LIGHT_OFF[4]     = { 0.00f, 0.00f, 0.00f, 1.0f };
+static const GLfloat ROOM_AMBIENT[4]  = { 0.42f, 0.42f, 0.45f, 1.0f };
+static const GLfloat SPOT_DOWN[3]     = { 0.0f, -1.0f, 0.0f };
 
-static void place_lights(const bool* sw) {
+// After the camera: the position and the spot direction are both moved by
+// the modelview matrix when they are set.
+static void place_lights() {
     for (int i = 0; i < 2; ++i) {
         const GLenum l = (GLenum)(GL_LIGHT0 + i);
+        const bool on = sw[room::SW_BULB_L + i];
         const GLfloat pos[4] = { BULB_X[i], BULB_Y, BULB_Z, 1.0f };
         glLightfv(l, GL_POSITION, pos);
-        glLightfv(l, GL_DIFFUSE, sw[room::SW_BULB_L + i] ? BULB_DIFFUSE
-                                                         : LIGHT_OFF);
+        glLightfv(l, GL_SPOT_DIRECTION, SPOT_DOWN);
+        glLightfv(l, GL_DIFFUSE,  on ? BULB_DIFFUSE  : LIGHT_OFF);
+        glLightfv(l, GL_SPECULAR, on ? BULB_SPECULAR : LIGHT_OFF);
     }
 }
 
@@ -59,27 +59,26 @@ static void display() {
     glLoadIdentity();
     cam::apply();
 
-    bool sw[room::SW_COUNT];
-    switch_flags(sw);
-    place_lights(sw);
+    place_lights();
+    shade::apply(mode);
     if (!edges) {                               // flat colour only
-        draw_world(sw);
+        draw_world();
     } else {
 
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(1.0f, 1.0f);
-        draw_world(sw);
+        draw_world();
         glDisable(GL_POLYGON_OFFSET_FILL);
 
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         glEnable(GL_BLEND);
         glBlendFunc(GL_ZERO, GL_SRC_COLOR);
-        draw_world(sw, true);
+        draw_world(true);
         glDisable(GL_BLEND);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     }
-    const hud::State st = { sw, edges };
-    hud::draw(st);
+    shade::off();
+    hud::draw(sw, edges, shade::NAME[mode]);
     glutSwapBuffers();
 }
 
@@ -97,14 +96,14 @@ static void idle() {
     prev = now;
     if (dt > DT_CLAMP) dt = DT_CLAMP;   // a window drag must not jump anything
 
-    if (machine_on) {
+    if (sw[room::SW_MACHINE]) {
         theta += CRANK_DPS * dt * RAD;
         while (theta >= 2.0f * PI) {    // one more revolution of the crank,
             theta -= 2.0f * PI;         // which is one more part stamped
             ++turns;
         }
     }
-    if (fan_on) fan_deg += FAN_DPS * dt;
+    if (sw[room::SW_FAN]) fan_deg += FAN_DPS * dt;
 
     cam::fly(dt);
     glutPostRedisplay();
@@ -113,21 +112,22 @@ static void idle() {
 static void keyboard(unsigned char k, int, int) {
     switch (k) {
     case 27: glutLeaveMainLoop(); break;
-    case ' ': machine_on = !machine_on; break;     // start and stop the line
+    case ' ': sw[room::SW_MACHINE] = !sw[room::SW_MACHINE]; break;  // start, stop
+    case '[': case '{': sw[room::SW_BULB_L] = !sw[room::SW_BULB_L]; break;
+    case ']': case '}': sw[room::SW_BULB_R] = !sw[room::SW_BULB_R]; break;
+    case 'f': case 'F': sw[room::SW_FAN]    = !sw[room::SW_FAN];    break;
     case 'e': case 'E': edges = !edges; break;
-    case '[': case '{': case ']': case '}': {             // bulb switches
-        const int i = (k == ']' || k == '}') ? 1 : 0;
-        bulb_on[i] = !bulb_on[i];
+    case 's': case 'S':                            // flat -> Gouraud -> Phong
+        mode = (shade::Mode)((mode + 1) % shade::MODE_COUNT);
+        if (mode == shade::PHONG && !shade::program) mode = shade::FLAT;
         break;
-    }
-    case 'f': case 'F': fan_on = !fan_on; break;          // fan switch
     case '1': case '2':                            // also leaves free cam
         cam::preset = k - '0'; cam::orbit = 0.0f;
         cam::set_free(false);
         break;
     case 'c': case 'C': cam::set_free(!cam::free_cam); break;
     case 'r': case 'R':                            // back to the start
-        theta = lay::START_DEG * RAD; turns = 0; fan_deg = 0.0f;
+        theta = lay::ENGAGE_DEG * RAD; turns = 0; fan_deg = 0.0f;
         cam::preset = 1; cam::orbit = 0.0f;
         cam::set_free(false);
         break;
@@ -166,15 +166,23 @@ static void init() {
     glCullFace(GL_BACK);
 
     glEnable(GL_LIGHTING);
-    glShadeModel(GL_SMOOTH);      // interpolate across a face, not flat-fill it
     glEnable(GL_NORMALIZE);       // the blank squash is a non-uniform scale
     glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ROOM_AMBIENT);
-    glEnable(GL_COLOR_MATERIAL);  // glColor3fv in the lists becomes the material
+    glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);   // true V for specular
+    glEnable(GL_COLOR_MATERIAL);  // glColor3fv in the lists becomes ka and kd
     glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
     for (int i = 0; i < 2; ++i) {
-        glLightfv((GLenum)(GL_LIGHT0 + i), GL_SPECULAR, LIGHT_OFF);
-        glEnable((GLenum)(GL_LIGHT0 + i));
+        const GLenum l = (GLenum)(GL_LIGHT0 + i);
+        glLightf(l, GL_CONSTANT_ATTENUATION,  BULB_A0);
+        glLightf(l, GL_LINEAR_ATTENUATION,    BULB_A1);
+        glLightf(l, GL_QUADRATIC_ATTENUATION, BULB_A2);
+        glLightf(l, GL_SPOT_CUTOFF,   BULB_CUTOFF);
+        glLightf(l, GL_SPOT_EXPONENT, BULB_SPOT_EXP);
+        glEnable(l);
     }
+
+    shade::build();
+    if (!shade::program) mode = shade::GOURAUD;    // no OpenGL 2.0: no Phong
 
     scene::build_lists();
     room::build_lists();        // after: it calls the machine's gear and blank lists
@@ -186,7 +194,11 @@ int main(int argc, char** argv) {
     glutInitWindowSize(cam::win_w, cam::win_h);
     glutCreateWindow("Quarter Turn");
 
-    printf("GL %s\n", glGetString(GL_VERSION));
+    // Windows' opengl32.dll stops at OpenGL 1.1; GLEW finds the 2.0 shader
+    // functions in the driver.  It needs the window's context, so it comes here.
+    glewInit();
+    printf("GL %s, GLSL %s\n", glGetString(GL_VERSION),
+           glGetString(GL_SHADING_LANGUAGE_VERSION));
 
     init();
     glutDisplayFunc(display);

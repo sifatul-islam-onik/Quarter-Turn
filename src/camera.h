@@ -20,8 +20,6 @@ inline float free_yaw = 0.0f;                   // degrees
 enum { MV_FWD = 0, MV_BACK, MV_TURN_L, MV_TURN_R, MV_UP, MV_DOWN, MV_COUNT };
 inline bool  held[MV_COUNT] = {};
 
-inline float clampf(float v, float lo, float hi) { return fminf(hi, fmaxf(lo, v)); }
-
 inline void preset_view(float* eye, float* at) {
     float ex, ey, ez, ax, ay, az;
     if (preset == 2) {                          // the whole room
@@ -75,7 +73,7 @@ inline void fly(float dt) {
     const float rise = (float)held[MV_UP]  - (float)held[MV_DOWN];
     const float step = FREE_SPEED * dt;
     for (int i = 0; i < 3; ++i) eye_pos[i] += step * fwd * f[i];
-    eye_pos[1] = clampf(eye_pos[1] + step * rise, FREE_Y_MIN, FREE_Y_MAX);
+    eye_pos[1] = fminf(FREE_Y_MAX, fmaxf(FREE_Y_MIN, eye_pos[1] + step * rise));
 
     // Held inside a cylinder about the room's centre, so it cannot fly off.
     const float cx = 0.5f * (ROOM_X0 + ROOM_X1), cz = 0.5f * (ROOM_Z0 + ROOM_Z1);

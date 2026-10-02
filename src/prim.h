@@ -11,6 +11,14 @@ namespace prim {
 using cfg::PI;
 using cfg::CYL_SLICES;
 
+// Start recording a display list; end it with glEndList().
+// Later, glCallList(id) replays everything recorded in between.
+inline GLuint new_list() {
+    const GLuint id = glGenLists(1);
+    glNewList(id, GL_COMPILE);
+    return id;
+}
+
 inline void box(float sx, float sy, float sz) {
     const float x = sx * 0.5f, y = sy * 0.5f, z = sz * 0.5f;
     glBegin(GL_QUADS);

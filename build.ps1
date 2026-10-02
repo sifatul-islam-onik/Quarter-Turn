@@ -17,7 +17,7 @@ $flags = @("-std=c++17", "-Wall", "-Wextra")
 if ($Release) { $flags += @("-O2", "-DNDEBUG") } else { $flags += @("-O0", "-g") }
 
 $src  = @(Join-Path $root "src\main.cpp")
-$libs = @("-lfreeglut", "-lopengl32", "-lglu32")
+$libs = @("-lglew32", "-lfreeglut", "-lopengl32", "-lglu32")
 
 Write-Host "building -> $out" -ForegroundColor Cyan
 & g++ @flags @src -o $out @libs

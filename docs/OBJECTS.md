@@ -4,7 +4,7 @@ Branch `static-objects`. This is the reference for **what each object is made
 of** and **where every number in it came from** — whether it was typed in by
 hand or worked out from something else.
 
-A link like [layout.h:59](../src/layout.h#L59) opens the code at that line.
+A link like [layout.h:32](../src/layout.h#L32) opens the code at that line.
 Named constants such as `CRANK_R` all live in [config.h](../src/config.h).
 
 ---
@@ -45,7 +45,9 @@ radians. `DEG` and `RAD` convert.
 startup ([main.cpp:162](../src/main.cpp#L162)) and is replayed each frame.
 Anything that changes with the clock is built fresh every frame instead. Each
 mechanism file has a `build_*` for the first kind and a `draw_*` for the
-second.
+second. Each list is a named `GLuint` at the top of its file, such as
+`tooth_list`: `new_list()` ([prim.h](../src/prim.h)) starts recording it,
+`glEndList()` stops, and `glCallList(tooth_list)` replays it.
 
 ---
 
@@ -56,14 +58,14 @@ modelling tool anywhere in the project — every object is these six.
 
 | Routine | Line | Shape | Notes |
 |---|---|---|---|
-| `box(sx, sy, sz)` | [14](../src/prim.h#L14) | cuboid centred on the origin | six faces, one `glNormal3f` each |
-| `box_span(x0,y0,z0, x1,y1,z1)` | [31](../src/prim.h#L31) | cuboid between two corners | the form most of the machine uses |
-| `cyl(r, h)` | [39](../src/prim.h#L39) | cylinder, base at `y=0`, axis `+y` | wall + two caps |
-| `cyl_z(r, h)` | [67](../src/prim.h#L67) | the same, axis `+z` | one `glRotatef(90,1,0,0)` around `cyl` |
-| `tiles_y(x0,z0,x1,z1, y, nx,nz, up)` | [74](../src/prim.h#L74) | horizontal rectangle in `nx × nz` cells | `up` picks the `+Y` or `−Y` face |
-| `tiles_z(x0,y0,x1,y1, z, nu,nv)` | [90](../src/prim.h#L90) | vertical rectangle in `nu × nv` cells | faces `+Z` in its own frame |
+| `box(sx, sy, sz)` | [14](../src/prim.h#L22) | cuboid centred on the origin | six faces, one `glNormal3f` each |
+| `box_span(x0,y0,z0, x1,y1,z1)` | [31](../src/prim.h#L39) | cuboid between two corners | the form most of the machine uses |
+| `cyl(r, h)` | [39](../src/prim.h#L47) | cylinder, base at `y=0`, axis `+y` | wall + two caps |
+| `cyl_z(r, h)` | [67](../src/prim.h#L75) | the same, axis `+z` | one `glRotatef(90,1,0,0)` around `cyl` |
+| `tiles_y(x0,z0,x1,z1, y, nx,nz, up)` | [74](../src/prim.h#L82) | horizontal rectangle in `nx × nz` cells | `up` picks the `+Y` or `−Y` face |
+| `tiles_z(x0,y0,x1,y1, z, nu,nv)` | [90](../src/prim.h#L98) | vertical rectangle in `nu × nv` cells | faces `+Z` in its own frame |
 
-A cylinder is `CYL_SLICES = 10` sided ([config.h:10](../src/config.h#L10)).
+A cylinder is `CYL_SLICES = 10` sided ([config.h:14](../src/config.h#L14)).
 That is deliberately low: the edge pass outlines every facet, so a rounder
 cylinder means a busier drawing.
 
@@ -76,12 +78,12 @@ receding in perspective — while a window pane is one cell.
 ## 3. The one clock
 
 The entire machine is a function of two values held in
-[main.cpp:17](../src/main.cpp#L17):
+[main.cpp:19](../src/main.cpp#L19):
 
 - `theta` — the crank angle in radians;
 - `turns` — how many whole revolutions of it have finished.
 
-`idle()` ([main.cpp:93](../src/main.cpp#L93)) does nothing but
+`idle()` ([main.cpp:92](../src/main.cpp#L92)) does nothing but
 
 ```
 theta += CRANK_DPS * dt * RAD        // CRANK_DPS = 72 deg/s, so 5 s a cycle
@@ -91,14 +93,14 @@ and rolls `turns` over at 360°. No part keeps an angle of its own, so no part
 can drift out of step with another however long it runs. One crank revolution
 is one finished part.
 
-`theta` starts at `START_DEG = 45°` ([layout.h:106](../src/layout.h#L106)),
+`theta` starts at `ENGAGE_DEG = 45°` ([layout.h:57](../src/layout.h#L57)),
 just after an index, so the belt begins on a whole station.
 
 ---
 
 ## 4. The machine, object by object
 
-### 4.1 Drive panel — `build_press` [press.h:9](../src/press.h#L9)
+### 4.1 Drive panel — `build_press` [press.h:11](../src/press.h#L11)
 
 One `box`. The flat green slab everything else is mounted on.
 
@@ -107,9 +109,9 @@ One `box`. The flat green slab everything else is mounted on.
 | `PANEL_CX, PANEL_CY, PANEL_CZ` | 3.2, 2.75, −1.0 | typed |
 | `PANEL_W, PANEL_H, PANEL_D` | 5.2, 5.5, 0.10 | typed |
 
-### 4.2 Motor — `build_fixtures` [fixtures.h:9](../src/fixtures.h#L9)
+### 4.2 Motor — `build_fixtures` [fixtures.h:13](../src/fixtures.h#L13)
 
-A `cyl_z` body, a `box_span` mount bracket, and a short `cyl_z` stub shaft
+A `cyl_z` body, a `box_span` saddle on the panel's top edge, and a short `cyl_z` stub shaft
 running into the first gear. It is centred on `G1` so it reads as driving the
 pinion, though nothing is transmitted — the gear angles come from the clock.
 
@@ -119,7 +121,7 @@ pinion, though nothing is transmitted — the gear angles come from the clock.
 | `MOTOR_Z0, MOTOR_Z1` | −1.75, −0.95 | typed |
 | position | `G1_X, G1_Y` | derived (follows the pinion) |
 
-### 4.3 Gear train — `build_gears` / `draw_gears` [gears.h:13](../src/gears.h#L13), [gears.h:41](../src/gears.h#L41)
+### 4.3 Gear train — `build_gears` / `draw_gears` [gears.h:15](../src/gears.h#L15), [gears.h:56](../src/gears.h#L56)
 
 Five gears, each a root cylinder plus a hub cylinder, with rectangular teeth
 instanced around it. **One tooth display list is drawn 124 times** (12+36+20+20+36).
@@ -130,16 +132,16 @@ otherwise.
 
 | Quantity | Formula / value | Where |
 |---|---|---|
-| tooth counts `N` | `{12, 36, 20, 20, 36}` typed | [config.h:34](../src/config.h#L34) |
-| module `m` | 0.05 typed | [config.h:31](../src/config.h#L31) |
-| pitch radius | `r = m·N/2` → 0.30, 0.90, 0.50, 0.50, 0.90 — **derived** | [layout.h:33](../src/layout.h#L33) |
-| root radius | `r − 1.25m` — derived | [gears.h:10](../src/gears.h#L10) |
-| tip radius | `r + 1.00m` — derived | [gears.h:11](../src/gears.h#L11) |
+| tooth counts `N` | `{12, 36, 20, 20, 36}` typed | [config.h:43](../src/config.h#L43) |
+| module `m` | 0.05 typed | [config.h:42](../src/config.h#L42) |
+| pitch radius | `r = m·N/2` → 0.30, 0.90, 0.50, 0.50, 0.90 — **derived** | [layout.h:16](../src/layout.h#L16) |
+| root radius | `r − 1.25m` — derived | [gears.h:12](../src/gears.h#L12) |
+| tip radius | `r + 1.00m` — derived | [gears.h:13](../src/gears.h#L13) |
 | tooth width | `TOOTH_W_FRAC · π · m` — derived | [gears.h:19](../src/gears.h#L19) |
-| centres G1, G2, G5 | typed | [config.h:41](../src/config.h#L41) |
-| centres G3, G4 | **solved** — see §7 | [config.h:45](../src/config.h#L45) |
-| pose at `theta = 90°` | `PHI_DEG[5]` solved | [layout.h:19](../src/layout.h#L19) |
-| rotation | `gear_deg(i, th) = PHI_DEG[i] + GEAR_RATE[i]·(th − 90°)` | [layout.h:55](../src/layout.h#L55) |
+| centres G1, G2, G5 | typed | [config.h:44](../src/config.h#L44) |
+| centres G3, G4 | **solved** — see §7 | [config.h:46](../src/config.h#L46) |
+| pose at `theta = 90°` | `PHI_DEG[5]` solved | [layout.h:13](../src/layout.h#L13) |
+| rotation | `gear_deg(i, th) = PHI_DEG[i] + GEAR_RATE[i]·(th − 90°)` | [layout.h:28](../src/layout.h#L28) |
 
 **The rate law.** At a mesh the next gear reverses and scales by the inverse
 tooth ratio:
@@ -149,14 +151,14 @@ rate[j] = -rate[i] * N[i] / N[j]
 ```
 
 With G2 as the reference at −1 this gives `GEAR_RATE = {3, −1, 1.8, −1.8, 1}`
-([layout.h:53](../src/layout.h#L53)). G2 → G3 → G4 → G5 is three meshes, so G5
+([layout.h:26](../src/layout.h#L26)). G2 → G3 → G4 → G5 is three meshes, so G5
 runs backwards against G2 — which is why the crank and the Geneva driver turn
 opposite ways. **The sign of this table is not free**; see §7.
 
 Brass and copper alternate along the train so the two gears at every mesh are
 different colours and each pair visibly turns opposite ways.
 
-### 4.4 Crank-slider press — `draw_press` [press.h:26](../src/press.h#L26)
+### 4.4 Crank-slider press — `draw_press` [press.h:28](../src/press.h#L28)
 
 Built fresh each frame: crank shaft (`cyl_z`), crank disc (`cyl_z`), crank pin
 (`cyl_z`), connecting rod (`box`), wrist pin (`cyl_z`), ram (`box`). The guide
@@ -164,11 +166,11 @@ rails and brackets are static and live in the panel list.
 
 | Quantity | Formula | Where |
 |---|---|---|
-| ram height | `s(t) = Y_C + r·cos t − √(L² − r²·sin²t)` | [layout.h:59](../src/layout.h#L59) |
-| punch face | `ram_top(t) − RAM_H` | [layout.h:64](../src/layout.h#L64) |
-| crank disc angle | `90° − t` | [layout.h:66](../src/layout.h#L66) |
-| crank pin | `(PRESS_X + r·sin t, CRANK_Y + r·cos t)` | [layout.h:67](../src/layout.h#L67) |
-| rod angle | `atan2(ram_top − pin_y, PRESS_X − pin_x)` | [layout.h:70](../src/layout.h#L70) |
+| ram height | `s(t) = Y_C + r·cos t − √(L² − r²·sin²t)` | [layout.h:32](../src/layout.h#L32) |
+| punch face | `ram_top(t) − RAM_H` | [layout.h:37](../src/layout.h#L37) |
+| crank disc angle | `90° − t` | [layout.h:39](../src/layout.h#L39) |
+| crank pin | `(PRESS_X + r·sin t, CRANK_Y + r·cos t)` | [layout.h:40](../src/layout.h#L40) |
+| rod angle | `atan2(ram_top − pin_y, PRESS_X − pin_x)` | [layout.h:43](../src/layout.h#L43) |
 
 `r = CRANK_R = 0.25`, `L = ROD_L = 1.00`, `Y_C = CRANK_Y = 4.75`, all typed.
 
@@ -184,7 +186,7 @@ Consequences that fall out of the law, not typed anywhere:
 (sin t, cos t)` — that identity is the whole reason `crank_deg` is `90 − t`. If
 one is changed without the other, the rod visibly misses the knob on the disc.
 
-### 4.5 Geneva drive — `build_geneva` / `draw_geneva_driver` [geneva.h:8](../src/geneva.h#L8), [geneva.h:27](../src/geneva.h#L27)
+### 4.5 Geneva drive — `build_geneva` / `draw_geneva_driver` [geneva.h:10](../src/geneva.h#L10), [geneva.h:29](../src/geneva.h#L29)
 
 The mechanism the project is named after. A driver arm on G5's shaft carries a
 pin; the pin enters one of four slots in a wheel keyed to the conveyor's head
@@ -195,16 +197,16 @@ gaps between the arms are the slots**, so the slots face 0°, 90°, 180°, 270°
 
 | Quantity | Formula / value | Where |
 |---|---|---|
-| slots `n` | 4 typed | [config.h:95](../src/config.h#L95) |
-| pin orbit `a` | `GEN_A` = 0.55 typed | [config.h:96](../src/config.h#L96) |
-| line of centres | `GEN_LOC_DEG` = 135° typed | [config.h:97](../src/config.h#L97) |
-| `λ` | `sin(π/n)` = 0.7071 — derived | [layout.h:74](../src/layout.h#L74) |
-| centre distance `c` | `a / λ` = 0.7778 — derived | [layout.h:75](../src/layout.h#L75) |
-| wheel radius | `√(c² − a²)` = 0.5500 — derived | [layout.h:76](../src/layout.h#L76) |
-| driver angle `α` | `wrap180(t)` | [layout.h:81](../src/layout.h#L81) |
-| arm angle | `GEN_LOC_DEG + α` | [layout.h:82](../src/layout.h#L82) |
-| engagement half-angle | `90° − 180°/n` = 45° — derived | [layout.h:84](../src/layout.h#L84) |
-| wheel angle `β` | `atan( λ·sin α / (1 − λ·cos α) )` | [layout.h:86](../src/layout.h#L86) |
+| slots `n` | 4 typed | [config.h:78](../src/config.h#L78) |
+| pin orbit `a` | `GEN_A` = 0.55 typed | [config.h:79](../src/config.h#L79) |
+| line of centres | `GEN_LOC_DEG` = 135° typed | [config.h:80](../src/config.h#L80) |
+| `λ` | `sin(π/n)` = 0.7071 — derived | [layout.h:47](../src/layout.h#L47) |
+| centre distance `c` | `a / λ` = 0.7778 — derived | [layout.h:48](../src/layout.h#L48) |
+| wheel radius | `√(c² − a²)` = 0.5500 — derived | [layout.h:49](../src/layout.h#L49) |
+| driver angle `α` | `wrap180(t)` | [layout.h:54](../src/layout.h#L54) |
+| arm angle | `GEN_LOC_DEG + α` | [layout.h:55](../src/layout.h#L55) |
+| engagement half-angle | `90° − 180°/n` = 45° — derived | [layout.h:57](../src/layout.h#L57) |
+| wheel angle `β` | `atan( λ·sin α / (1 − λ·cos α) )` | [layout.h:59](../src/layout.h#L59) |
 
 **Where β comes from.** Put the driver at the origin with the wheel at distance
 `c` along `+x`. The pin sits at `(a·cos α, a·sin α)`, so seen from the wheel's
@@ -227,7 +229,7 @@ circular blank on the driver that traps the wheel between indexes. Here the
 wheel is held still by the arithmetic instead, and the driver sweeps through
 the space where the lock would be.
 
-### 4.6 Conveyor — `build_conveyor` / `draw_conveyor` [conveyor.h:9](../src/conveyor.h#L9), [conveyor.h:61](../src/conveyor.h#L61)
+### 4.6 Conveyor — `build_conveyor` / `draw_conveyor` [conveyor.h:14](../src/conveyor.h#L14), [conveyor.h:66](../src/conveyor.h#L66)
 
 Static: side frame rails and four legs (`box_span`), the belt's two straight
 runs (`box_span`) and two half-shell wraps (`cyl_z`). Per frame: two rollers,
@@ -235,15 +237,15 @@ the Geneva wheel, a stub shaft, and 24 cleats.
 
 | Quantity | Formula / value | Where |
 |---|---|---|
-| belt centreline radius | `BELT_R_C` = 0.40 typed | [config.h:77](../src/config.h#L77) |
-| **station pitch** | `p = R_c · π/2` = 0.628319 — derived | [layout.h:112](../src/layout.h#L112) |
-| roller span | `10p` — derived | [layout.h:113](../src/layout.h#L113) |
-| head roller | `HEAD_X` = 4.000 typed | [config.h:75](../src/config.h#L75) |
-| tail roller | `HEAD_X − 10p` = −2.283185 — derived | [layout.h:114](../src/layout.h#L114) |
-| loop length | `24p` — derived | [layout.h:115](../src/layout.h#L115) |
-| station *j* | `tail_x + j·p` — derived | [layout.h:116](../src/layout.h#L116) |
-| cleat *k* | at `(k + ½)·p` along the loop | [layout.h:146](../src/layout.h#L146) |
-| roller / wheel angle | `−90°·B` | [layout.h:109](../src/layout.h#L109) |
+| belt centreline radius | `BELT_R_C` = 0.40 typed | [config.h:98](../src/config.h#L98) |
+| **station pitch** | `p = R_c · π/2` = 0.628319 — derived | [layout.h:83](../src/layout.h#L83) |
+| roller span | `10p` — derived | [layout.h:84](../src/layout.h#L84) |
+| head roller | `HEAD_X` = 4.000 typed | [config.h:95](../src/config.h#L95) |
+| tail roller | `HEAD_X − 10p` = −2.283185 — derived | [layout.h:85](../src/layout.h#L85) |
+| loop length | `24p` — derived | [layout.h:86](../src/layout.h#L86) |
+| station *j* | `tail_x + j·p` — derived | [layout.h:87](../src/layout.h#L87) |
+| cleat *k* | at `(k + ½)·p` along the loop | [layout.h:117](../src/layout.h#L117) |
+| roller / wheel angle | `−90°·B` | [layout.h:80](../src/layout.h#L80) |
 
 **Why the pitch is what it is.** `p = R_c·π/2` is exactly the arc a quarter
 turn of the roller drags. That single choice is what makes one Geneva index
@@ -252,11 +254,11 @@ advance the belt exactly one station — it is not tuned, it is construction.
 
 Cleats sit half a pitch off the stations so a cleat never overlaps a blank.
 
-**`belt_path(s)`** ([layout.h:121](../src/layout.h#L121)) maps a distance along
+**`belt_path(s)`** ([layout.h:92](../src/layout.h#L92)) maps a distance along
 the loop to a position and a rotation, in four pieces: top run, head wrap,
 bottom run, tail wrap. It is what puts cleats correctly round the roller ends.
 
-### 4.7 Belt travel — [layout.h:91](../src/layout.h#L91), [layout.h:97](../src/layout.h#L97)
+### 4.7 Belt travel — [layout.h:64](../src/layout.h#L64), [layout.h:70](../src/layout.h#L70)
 
 `B` is belt travel **in stations**, and everything that rides the belt uses it.
 
@@ -276,7 +278,7 @@ pieces:
 
 which is continuous across both joins.
 
-### 4.8 Blanks — `build_blanks` / `draw_blanks` [blanks.h:10](../src/blanks.h#L10), [blanks.h:29](../src/blanks.h#L29)
+### 4.8 Blanks — `build_blanks` / `draw_blanks` [blanks.h:12](../src/blanks.h#L12), [blanks.h:31](../src/blanks.h#L31)
 
 One `cyl` list, drawn nine times. `BLANK_R` = 0.18, `BLANK_H` = 0.20,
 `BLANK_H_FLAT` = 0.10, all typed.
@@ -284,10 +286,10 @@ One `cyl` list, drawn nine times. `BLANK_R` = 0.18, `BLANK_H` = 0.20,
 Position: slot *j* sits at `station_x(j) + frac(B)·p`. When `B` passes a whole
 number every blank has moved up one station, so the blank drawn at slot *j*
 takes over the place slot *j−1* just left — one leaves at the head roller, one
-arrives from the magazine, and nothing in between appears to move.
+arrives at station 1, and nothing in between appears to move.
 
 Height is read straight off where the blank stands and where the punch is,
-with no per-blank state at all ([layout.h:148](../src/layout.h#L148)):
+with no per-blank state at all ([layout.h:119](../src/layout.h#L119)):
 
 ```
 x < PRESS_X  →  BLANK_H           not yet stamped
@@ -299,27 +301,16 @@ The squash is `glScalef(1, h/BLANK_H, 1)` about the blank's base. It is the
 only `glScalef` in the machine, and it is a non-uniform scale, which is why
 `GL_NORMALIZE` is on.
 
-### 4.9 Feed magazine and exit hood — `build_fixtures` [fixtures.h:9](../src/fixtures.h#L9)
-
-Magazine: two `box_span` plates either side of the belt at station 1, blanks
-notionally dropping between them. `MAG_W` = 0.50, `MAG_WALL` = 0.06, typed.
-
-Exit hood: one `box_span` plate over the belt, open all round underneath.
-`HOOD_X0/X1` = 3.67 / 4.45, typed — 0.30 past station 9.
-
-> The discharge chute and collection bin were removed: the belt recycles its
-> blanks along the top run rather than carrying them over the roller, so both
-> stood permanently empty.
-
-### 4.10 Stack light — `draw_stack_light` [fixtures.h:55](../src/fixtures.h#L55)
+### 4.9 Stack light — `draw_stack_light` [fixtures.h:44](../src/fixtures.h#L44)
 
 A post (`cyl`), a housing (`cyl`), and three lens segments from one list. Green,
-amber, red upward. `STACK_LIT = 0` ([layout.h:154](../src/layout.h#L154)) picks
+amber, red upward. `i == 0` ([fixtures.h:61](../src/fixtures.h#L61)) picks
 the lit one — green, fixed.
 
-The lenses are drawn with **lighting disabled**: a lamp makes light, it does
-not catch it. `mat::lens()` ([materials.h](../src/materials.h)) gives the full
-colour when lit and a dim version when not.
+A lit lens uses the **emission** term: a lamp makes light, it does not need to
+catch it. `mat::lens()` ([materials.h](../src/materials.h)) makes the lit one
+glow in its full colour, and leaves the others as dim plastic that only
+reflects.
 
 ---
 
@@ -330,37 +321,55 @@ recorded in the README.
 
 **The cutaway.** A wall, and everything mounted on it, is drawn only while the
 eye is on the room side of that wall's plane
-(`wall_shown`, [room.h:41](../src/room.h#L41)). So the walls between the camera
+(`wall_shown`, [room.h:50](../src/room.h#L50)). So the walls between the camera
 and the machine vanish as it orbits and the far ones stay. Back-face culling
 alone would hide the bare wall surfaces, but not the boxes fixed to them — a
 window frame would float in front of the machine.
 
 **Wall frames.** Each wall is built in its own frame: `u` runs along the wall
 left to right as seen from inside, `y` is up, `z` points out of the wall into
-the room (`enter_wall`, [room.h:26](../src/room.h#L26)). One `window()` routine
+the room (`enter_wall`, [room.h:35](../src/room.h#L35)). One window list
 then serves all four walls. `back_u`/`left_u`/`right_u`/`front_u`
-([room.h:36](../src/room.h#L36)) convert a world coordinate into that wall's `u`.
+([room.h:45](../src/room.h#L45)) convert a world coordinate into that wall's `u`.
+
+**Build once, draw many.** Every room part that appears more than once is one
+display list, recorded once in `build_lists()` ([room.h:280](../src/room.h#L280))
+and placed with a `glTranslatef` per copy. The parts are built first, because
+a list that calls another records its id when it is compiled.
+
+| List | Drawn | Where the copies go |
+|---|---|---|
+| `window_list` | 9 | `window_at(u)` on each wall, inside that wall's list |
+| `beam_list` | 5 | `ceiling()`, one per `BEAM_PITCH` |
+| `lamp_list` | 2 | `draw()`, at each bulb |
+| `globe_list` | 2 | `draw()`, coloured per frame by its switch |
+| `pallet_list` | 2 | `loaded_pallet()`, at `PAL_X[p], PAL_Z[p]` |
+| `drum_list` | 2 | `drums()`, coloured before each call |
 
 | Object | Built from | Line | Key numbers |
 |---|---|---|---|
-| Floor | `tiles_y`, 15 × 8 cells of 1.0 | [fixtures.h:13](../src/fixtures.h#L13) | `FLOOR_X0/X1/Z0/Z1` typed |
-| Wall surface | two `tiles_z` bands + a trim `box_span` | [room.h:50](../src/room.h#L50) | `DADO_H` 1.20, `CEIL_Y` 9.5 typed |
-| Window ×11 | one `tiles_z` pane + four `box_span` frame bars | [room.h:61](../src/room.h#L61) | `WIN_W` 1.80, `WIN_H` 1.80 typed |
-| Ceiling | `tiles_y` facing **down** | [room.h:126](../src/room.h#L126) | — |
-| I-beams ×5 | three `box_span` each (flange, web, flange) | [room.h:134](../src/room.h#L134) | `BEAM_X0` −3.90, `BEAM_PITCH` 3.00 |
-| Pendant flex ×2 | thin `cyl` from ceiling to bulb | [room.h:142](../src/room.h#L142) | `BULB_X[2]`, `BULB_Y` 5.40 |
-| Bulb globe ×2 | `cyl` radius `BULB_R` | [room.h:153](../src/room.h#L153) | drawn unlit; follows its switch |
-| Hazard border | four `tiles_y` strips, 0.004 proud | [room.h:166](../src/room.h#L166) | `HAZ_*` typed |
-| Pallet | 3 bearers + 5 deck boards + 9 blanks | [room.h:175](../src/room.h#L175) | `PAL_X/Z` typed; reuses `L_BLANK` |
-| Cabinet | one `box_span` + four switch plates | [room.h:197](../src/room.h#L197) | `CAB_X0/X1/H/D` typed |
-| Drums ×2 | `cyl` | [room.h:207](../src/room.h#L207) | `DRUM_R` 0.30, `DRUM_H` 0.88 |
-| Spare-gear shelf | `box_span` shelf + 2 brackets + 2 gears | [room.h:110](../src/room.h#L110) | reuses `L_GEAR0`, `L_TOOTH` |
-| Exhaust fan | housing (4 bars + grille) + 6-blade rotor | [room.h:89](../src/room.h#L89), [room.h:217](../src/room.h#L217) | `FAN_BLADES` 6 |
-| Switch lamps ×4 | `cyl_z`, drawn unlit | [room.h:276](../src/room.h#L276) | colours shared with the HUD |
+| Floor | `tiles_y`, 15 × 8 cells of 1.0 | [fixtures.h:17](../src/fixtures.h#L17) | `ROOM_X0/X1/Z0/Z1` typed — the floor is the room's footprint |
+| Wall surface | two `tiles_z` bands + a trim `box_span` | [room.h:59](../src/room.h#L59) | `DADO_H` 1.20, `CEIL_Y` 9.5 typed |
+| Frame | four `box_span` bars round an opening | [room.h:72](../src/room.h#L72) | shared by the windows and the fan housing |
+| Window ×9 | one glowing `tiles_z` pane + `frame()` + a cross bar | [room.h:81](../src/room.h#L81) | `WIN_W` 1.80, `WIN_H` 1.80, `WIN_BAR` 0.05 typed |
+| Ceiling | `tiles_y` facing **down** + the beams | [room.h:147](../src/room.h#L147) | — |
+| I-beam ×5 | three `box_span` (flange, web, flange) | [room.h:139](../src/room.h#L139) | `BEAM_X0` −3.90, `BEAM_PITCH` 3.00 |
+| Pendant lamp ×2 | thin `cyl` flex + two `cyl` for the shade | [room.h:163](../src/room.h#L163) | `BULB_X[2]`, `BULB_Y` 6.60, `SHADE_R` 0.30 |
+| Bulb globe ×2 | `cyl` radius `BULB_R` | [room.h:174](../src/room.h#L174) | glows when on, dark glass when off |
+| Hazard border | four `tiles_y` strips, 0.004 proud | [room.h:187](../src/room.h#L187) | `HAZ_*` typed |
+| Pallet ×2 | 3 bearers + 5 deck boards | [room.h:197](../src/room.h#L197) | `PAL_S` 1.20, `PAL_TOP` 0.13 typed |
+| Load of blanks ×2 | 9 × `scene::draw_blank()` | [room.h:212](../src/room.h#L212) | raw (`BLANK_H`) by the tail, stamped (`BLANK_H_FLAT`) by the head |
+| Cabinet | one `box_span` + door seam + four switch plates | [room.h:228](../src/room.h#L228) | `CAB_X0/X1/H/D` typed |
+| Drum ×2 | `cyl` body + three `cyl` hoops | [room.h:242](../src/room.h#L242) | `DRUM_R` 0.30, `DRUM_H` 0.88 |
+| Spare-gear shelf | `box_span` shelf + 2 brackets + 2 gears | [room.h:123](../src/room.h#L123) | calls `scene::gear_shape()` |
+| Exhaust fan | housing (`frame()` + grille) + 6-blade rotor | [room.h:106](../src/room.h#L106), [room.h:263](../src/room.h#L263) | `FAN_BLADES` 6 |
+| Switch lamps ×4 | `cyl_z`, glowing when on | [room.h:338](../src/room.h#L338) | colours shared with the HUD |
 
-Two objects deliberately **reuse the machine's own display lists**, so they are
-exactly the parts they represent: the spare gears on the shelf are built from
-`L_GEAR0` and `L_TOOTH`, and the pallet is stacked with `L_BLANK`. That is why
+Three room objects deliberately **reuse the machine's own parts**, so they are
+exactly the parts they represent: the spare gears on the shelf are drawn by
+`scene::gear_shape()` from `gear_list` and `tooth_list`, and both pallets are
+loaded by `scene::draw_blank()` from `blank_list` — the stamped load with the
+same squash the belt uses. That is why
 `room::build_lists()` has to run *after* `scene::build_lists()`
 ([main.cpp:162](../src/main.cpp#L162)).
 
@@ -415,20 +424,20 @@ depending on it.
 **Free — change and rebuild.** Colours ([materials.h](../src/materials.h)),
 `CRANK_DPS` and `FAN_DPS`, `CYL_SLICES`, all the room dimensions, the cabinet,
 drums, pallet, shelf, beams, windows, hazard border, camera presets, light
-colours, `BLANK_R`, panel and motor sizes, magazine and hood.
+colours, `BLANK_R`, panel and motor sizes.
 
 **Coupled — read this first.**
 
 | Number | What depends on it |
 |---|---|
 | `TEETH`, `MODULE` | every pitch radius, and therefore **every gear centre**. Two meshing gears must sit exactly `r_i + r_j` apart. |
-| `G3_X/Y`, `G4_X/Y` ([config.h:45](../src/config.h#L45)) | **solved**, not typed by choice — see the construction below. All four meshes currently sit at their exact pitch-radius sums. |
+| `G3_X/Y`, `G4_X/Y` ([config.h:46](../src/config.h#L46)) | **solved**, not typed by choice — see the construction below. All four meshes currently sit at their exact pitch-radius sums. |
 | `GEAR_RATE` signs | not free. The belt must feed towards the head roller → fixes the wheel's direction → fixes the driver's → fixes G5's → and G2 is three meshes back. |
 | `BELT_R_C` | the station pitch, and so every station position, the tail roller, the loop length and `CLEAT_N`. |
 | `GEN_A`, `GEN_SLOTS` | the centre distance and wheel radius, and therefore where the head roller must sit relative to G5. They are currently 0.7778 apart, exactly `c`. |
 | `CRANK_R`, `ROD_L`, `RAM_H` | the stroke, and the punch gap at the bottom — which is what makes a stamped blank exactly `BLANK_H_FLAT` tall. |
 | `POSE_DEG` (90°) | `PHI_DEG` was solved at this angle. Changing it rotates the whole train out of its solved pose. |
-| `PRESS_STATION` / `PRESS_X` | station 7 is at exactly `PRESS_X`. The blank height rule compares against `PRESS_X`. |
+| `PRESS_X` | station 7 is at exactly `PRESS_X`. The blank height rule compares against `PRESS_X`. |
 
 ### How G3 and G4 were placed
 

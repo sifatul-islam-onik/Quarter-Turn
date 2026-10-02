@@ -10,34 +10,10 @@ namespace lay {
 using namespace cfg;
 
 
-struct Gear {
-    int   N;
-    float r;        // pitch radius, m*N/2
-    float cx, cy;   // centre, in the gear plane z = GEAR_Z
-};
-
 constexpr float PHI_DEG[5] = { 105.0000f, 270.0000f, 270.3666f,
-                               182.5143f, 178.8809f };
+                               182.5143f, 178.8809f };  // each gear's angle at theta = 90 deg
 
-struct Layout {
-    Gear  g[5];
-    float phi[5];           // each gear's angle at theta = 90 deg
-    Layout();
-};
-
-inline Layout::Layout() {
-    static const float cx[5] = { G1_X, G2_X, G3_X, G4_X, G5_X };
-    static const float cy[5] = { G1_Y, G2_Y, G3_Y, G4_Y, G5_Y };
-    for (int i = 0; i < 5; ++i) {
-        g[i].N  = TEETH[i];
-        g[i].r  = MODULE * TEETH[i] * 0.5f;      // pitch radius
-        g[i].cx = cx[i];
-        g[i].cy = cy[i];
-        phi[i]  = PHI_DEG[i];
-    }
-}
-
-inline const Layout LAY;
+inline float gear_r(int i) { return MODULE * TEETH[i] * 0.5f; }  // pitch radius
 
 constexpr float POSE_DEG = 90.0f;
 
@@ -45,9 +21,6 @@ inline float wrap180(float d) {
     while (d >   180.0f) d -= 360.0f;
     while (d <= -180.0f) d += 360.0f;
     return d;
-}
-inline float clampf(float v, float lo, float hi) {
-    return v < lo ? lo : (v > hi ? hi : v);
 }
 
 constexpr float GEAR_RATE[5] = { 3.0f, -1.0f, 1.8f, -1.8f, 1.0f };
@@ -103,8 +76,6 @@ inline float belt_travel(float th, long turns) {
     return B < 0.0f ? 0.0f : B;        // only before the first index completes
 }
 
-constexpr float START_DEG = ENGAGE_DEG;
-
 // The wheel, and the head roller keyed to it, turn a quarter turn per station.
 inline float wheel_deg(float B) { return -(360.0f / (float)GEN_SLOTS) * B; }
 
@@ -148,10 +119,8 @@ inline float cleat_s(int k) { return ((float)k + 0.5f) * pitch(); }
 inline float blank_h_at(float x, float th) {
     if (x < PRESS_X - 0.02f) return BLANK_H;
     if (x > PRESS_X + 0.02f) return BLANK_H_FLAT;
-    return clampf(punch_face(th) - BELT_TOP_Y, BLANK_H_FLAT, BLANK_H);
+    return fminf(BLANK_H, fmaxf(BLANK_H_FLAT, punch_face(th) - BELT_TOP_Y));
 }
-
-constexpr int  STACK_LIT  = 0;
 
 } // namespace lay
 #endif

@@ -13,7 +13,6 @@
 namespace scene {
 
 inline void build_lists() {
-    g_list = glGenLists(L_COUNT);
     build_fixtures();
     build_press();
     build_gears();
@@ -25,12 +24,11 @@ inline void build_lists() {
 inline void draw(float th, long turns) {
     const float B = lay::belt_travel(th, turns);   // belt travel, in stations
 
-    glCallList(L(L_FLOOR));
-    glCallList(L(L_PANEL));
-    glCallList(L(L_CONVEYOR));
-    glCallList(L(L_FIXTURES));
-    glCallList(L(L_MOTOR));
-    glCallList(L(L_BELT));
+    glCallList(floor_list);
+    glCallList(panel_list);
+    glCallList(frame_list);
+    glCallList(motor_list);
+    glCallList(belt_list);
 
     draw_gears(th);           // gears.h
     draw_press(th);           // press.h     - chains A and B

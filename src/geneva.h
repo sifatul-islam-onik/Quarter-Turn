@@ -5,11 +5,13 @@
 
 namespace scene {
 
+inline GLuint geneva_list;     // the four-slot wheel
+
 inline void build_geneva() {
     const float R  = lay::gen_wheel_r();
     const float z0 = GEN_WHEEL_Z0, z1 = GEN_WHEEL_Z0 + GEN_WHEEL_T;
 
-    glNewList(L(L_GENEVA), GL_COMPILE);
+    geneva_list = new_list();
     mat::use(mat::BRASS);
     glPushMatrix();
     glTranslatef(0, 0, z0);
