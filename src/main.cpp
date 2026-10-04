@@ -13,6 +13,7 @@
 #include "camera.h"
 #include "hud.h"
 #include "shading.h"
+#include "shadows.h"
 
 using namespace cfg;
 
@@ -24,20 +25,25 @@ static float fan_deg = 0.0f;                   // the one part off the clock
 static bool sw[room::SW_COUNT] = { true, true, true, true };
 
 static bool edges = true;                      // e: the edge-line pass
-static shade::Mode mode = shade::PHONG;        // s: flat, Gouraud, Phong
+static shade::Mode mode = shade::RAYS;         // s: flat, Gouraud, Phong, rays
 
 
 static void draw_world(bool edge_pass = false) {
     scene::draw(theta, turns);
-    room::draw(cam::eye_pos, sw, fan_deg, edge_pass);
+    room::draw(sw, fan_deg, edge_pass);
 }
 
 
 static const GLfloat BULB_DIFFUSE[4]  = { 0.85f, 0.80f, 0.70f, 1.0f };
 static const GLfloat BULB_SPECULAR[4] = { 0.90f, 0.88f, 0.82f, 1.0f };
 static const GLfloat LIGHT_OFF[4]     = { 0.00f, 0.00f, 0.00f, 1.0f };
-static const GLfloat ROOM_AMBIENT[4]  = { 0.42f, 0.42f, 0.45f, 1.0f };
+static const GLfloat ROOM_AMBIENT[4]  = { 0.33f, 0.32f, 0.30f, 1.0f };   // warm: bounced light
 static const GLfloat SPOT_DOWN[3]     = { 0.0f, -1.0f, 0.0f };
+
+// Daylight through the windows: a third, directional light (w = 0), cool
+// against the warm bulbs, from the front left and above.
+static const GLfloat DAYLIGHT[4]     = { 0.30f, 0.33f, 0.40f, 1.0f };
+static const GLfloat DAYLIGHT_DIR[4] = { -0.45f, 0.75f, 0.50f, 0.0f };
 
 // After the camera: the position and the spot direction are both moved by
 // the modelview matrix when they are set.
@@ -51,6 +57,7 @@ static void place_lights() {
         glLightfv(l, GL_DIFFUSE,  on ? BULB_DIFFUSE  : LIGHT_OFF);
         glLightfv(l, GL_SPECULAR, on ? BULB_SPECULAR : LIGHT_OFF);
     }
+    glLightfv(GL_LIGHT2, GL_POSITION, DAYLIGHT_DIR);
 }
 
 static void display() {
@@ -61,6 +68,7 @@ static void display() {
 
     place_lights();
     shade::apply(mode);
+    if (mode == shade::RAYS) shadows::upload(shade::program, theta, turns);
     if (!edges) {                               // flat colour only
         draw_world();
     } else {
@@ -119,7 +127,7 @@ static void keyboard(unsigned char k, int, int) {
     case 'e': case 'E': edges = !edges; break;
     case 's': case 'S':                            // flat -> Gouraud -> Phong
         mode = (shade::Mode)((mode + 1) % shade::MODE_COUNT);
-        if (mode == shade::PHONG && !shade::program) mode = shade::FLAT;
+        if (mode >= shade::PHONG && !shade::program) mode = shade::FLAT;
         break;
     case '1': case '2':                            // also leaves free cam
         cam::preset = k - '0'; cam::orbit = 0.0f;
@@ -151,8 +159,8 @@ static void special(int k, int, int) {
     hold(k, true);
     if (cam::free_cam) return;                  // the arrows fly instead
     switch (k) {                                // up and down had the speed
-    case GLUT_KEY_LEFT:  cam::orbit -= 3.0f; break;
-    case GLUT_KEY_RIGHT: cam::orbit += 3.0f; break;
+    case GLUT_KEY_LEFT:  cam::orbit = fmaxf(cam::orbit - 3.0f, -ORBIT_MAX); break;
+    case GLUT_KEY_RIGHT: cam::orbit = fminf(cam::orbit + 3.0f,  ORBIT_MAX); break;
     default: break;
     }
 }
@@ -180,9 +188,11 @@ static void init() {
         glLightf(l, GL_SPOT_EXPONENT, BULB_SPOT_EXP);
         glEnable(l);
     }
+    glLightfv(GL_LIGHT2, GL_DIFFUSE, DAYLIGHT);    // no specular: soft sky light
+    glEnable(GL_LIGHT2);
 
     shade::build();
-    if (!shade::program) mode = shade::GOURAUD;    // no OpenGL 2.0: no Phong
+    if (!shade::program) mode = shade::GOURAUD;    // no OpenGL 2.0: no shaders
 
     scene::build_lists();
     room::build_lists();        // after: it calls the machine's gear and blank lists

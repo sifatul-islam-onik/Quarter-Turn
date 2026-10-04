@@ -428,19 +428,43 @@ Things that had to be right:
   the whole panel.
 - A switched-off bulb sets its light's diffuse and specular to black, and its
   glass turns to dark glass by the same flag.
+- **Daylight:** a third light, directional (`w = 0`: a direction, no position,
+  no attenuation), cool blue against the warm bulbs and coming from the front
+  left. With it the ambient could come down and turn warm (light bounced off
+  the cream walls), so every part has a lit side and a shaded side instead of
+  one flat ambient colour.
+
+**Ray-traced shadows.** The slides list ray tracing as a shading method in
+which each pixel follows its own ray, and note that it is what gives shadows.
+A full ray tracer would need the whole scene written again as maths, so I
+traced only the shadow rays. The rasterizer finds the point a pixel sees,
+and the Phong program ([src/shading.h](../src/shading.h)) sends a ray from
+it to each bulb. [src/shadows.h](../src/shadows.h) lists the parts as boxes
+and cylinders, rebuilt every frame from the same numbers they are drawn
+with. A box uses the slab test, and a cylinder a quadratic for where the
+ray meets its circle. Both give the stretch of the ray inside the shape,
+and if that stretch lies between the point and the bulb, the bulb is
+blocked there. Two things had to be right:
+
+- The ray starts a hundredth of a unit off the surface, along its normal;
+  started on the surface, a part would shadow itself.
+- The shapes must match the drawn parts. A box even slightly bigger than its
+  part puts that part's own surface inside it, and the surface goes dark.
+  That is why the gears cast shadows from their bodies only, not their teeth.
 
 ## Step 11 — the room, the camera and the switches
 
-With the machine working, I placed it in a **cutaway workshop**
+With the machine working, I placed it in a **workshop**
 ([src/room.h](../src/room.h)): walls with windows, ceiling beams, two pendant
 lamps, a hazard border on the floor, a pallet of raw blanks and one of stamped
 parts, an electrical cabinet, drums, a shelf of spare gears and an exhaust fan.
 
-- **Cutaway walls:** each wall is drawn only while the eye is on the room side
-  of it (`wall_shown()`), so whichever wall stands between the camera and the
-  machine disappears as the camera orbits.
+- **Inside only:** the first room was a 15 × 8 cutaway, where a wall vanished
+  whenever the eye was outside it (`wall_shown()`). Later the room grew to
+  23 × 16 and every camera was locked inside it, so all four walls are always
+  drawn and the cutaway test was deleted.
 - **Reuse:** anything that appears more than once is one display list placed
-  with a `glTranslatef` per copy — a window (9), an I-beam (5), a lamp (2), a
+  with a `glTranslatef` per copy — a window (17), an I-beam (7), a lamp (2), a
   pallet (2), a drum (2). The spare gears on the shelf and the blanks on both
   pallets call the machine's own lists and `draw_blank()`, so they are exactly
   the same parts; the stamped pallet's blanks get the belt's own squash.
@@ -450,12 +474,14 @@ parts, an electrical cabinet, drums, a shelf of spare gears and an exhaust fan.
 
 The camera ([src/camera.h](../src/camera.h)):
 
-- `1` / `2` — two `gluLookAt` presets: the line, and the whole room;
-- `←` `→` — orbit the eye around the look-at point;
+- `1` / `2` — two `gluLookAt` presets: the line, and the room from its front
+  corner;
+- `←` `→` — orbit the eye around the look-at point, up to 90° each way;
 - `c` — a free camera that flies level (one yaw angle): arrows to fly and turn,
-  PgUp/PgDn to rise and sink, all at `speed × dt`. Its near plane drops to 0.2
-  so it can get close to a mechanism, and it is kept inside a cylinder around
-  the room so the far plane (40) still covers everything;
+  PgUp/PgDn to rise and sink, all at `speed × dt`;
+- every eye, preset or free, is clamped to a box just inside the walls
+  (`keep_inside()`), so the camera can never leave the room. That is why one
+  near plane, 0.2, serves every view, and the far plane (40) covers everything;
 - `r` — reset the crank and the camera.
 
 ## Step 12 — checking it

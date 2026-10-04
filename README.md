@@ -5,14 +5,15 @@
 | `src/press.h` | the drive panel and the crank-slider press (FR-4) |
 | `src/geneva.h` | the driver arm and the four-slot wheel (FR-5) |
 | `src/conveyor.h` | frame, rollers, belt, cleats (FR-6) |
-| `src/blanks.h` | the workpieces and the squash (FR-7) |
+| `src/blanks.h` | the workpieces, the squash (FR-7), the bin and the fall into it |
 | `src/fixtures.h` | floor, motor, stack light |
 | `src/scene.h` | assembles those six into the machine: build order, draw order |
-| `src/room.h` | the cutaway workshop: walls, windows, beams, lamps, pallets, drums, cabinet switches, fan |
+| `src/room.h` | the workshop: walls, windows, beams, lamps, pallets, drums, cabinet switches, fan |
 | `src/camera.h` | two preset views, orbit, the level free camera |
 | `src/hud.h` | the switch panel and the key hint |
-| `src/shading.h` | flat, Gouraud and the per-pixel Phong program (GLSL 1.10) |
-| `src/main.cpp` | GLUT glue, GLEW, the clock, the spotlights, input, the fill and edge passes |
+| `src/shading.h` | flat, Gouraud, and the per-pixel Phong program with its shadow rays (GLSL 1.10) |
+| `src/shadows.h` | the shapes the shadow rays are traced against, rebuilt each frame |
+| `src/main.cpp` | GLUT glue, GLEW, the clock, the spotlights and daylight, input, the fill and edge passes |
 # Quarter Turn
 
 An automated stamping line in OpenGL — CSE 4207 Computer Graphics, KUET.
@@ -20,8 +21,9 @@ An automated stamping line in OpenGL — CSE 4207 Computer Graphics, KUET.
 > **Branch `static-objects`: the minimal build.** The machine runs and the room
 > is lit, both in the smallest form that is still correct. The whole machine is
 > a function of one angle; the lighting is the slides' Phong reflection model
-> (ambient, diffuse, specular, emission) from two attenuated spotlights, shaded
-> flat, Gouraud or per-pixel Phong (a small GLSL program).
+> (ambient, diffuse, specular, emission) from two attenuated spotlights and a
+> directional daylight, shaded flat, Gouraud or per-pixel Phong (a small GLSL
+> program), with ray-traced shadows on top.
 >
 > The branch name is now a misnomer — it started as the objects on their own.
 
@@ -31,9 +33,9 @@ Geneva mechanism on the conveyor's head roller, converting continuous rotation
 into exactly one quarter turn of the roller followed by a locked pause. Each
 quarter turn advances the belt one station: blanks enter at the tail end, ride
 the belt, stop under the press, are flattened while the belt is locked, and
-leave at the head roller. The line stands in a cutaway
+fall off the head roller into a bin. The line stands in a
 workshop (walls, windows, ceiling
-beams), whose near walls drop away as the camera orbits. Two bulbs hang over
+beams), and every camera stays inside it. Two bulbs hang over
 the line, and the bulbs, the exhaust fan and the machine each have their own
 switch.
 
@@ -52,20 +54,24 @@ holds every formula, and `main.cpp` does nothing per frame but add
   revolution;
 - **the belt and the blanks** — belt travel falls straight out of the wheel
   angle, because a quarter turn of the wheel is one belt pitch by construction;
-  a blank's height is read off where it stands and where the punch is.
+  a blank's height is read off where it stands and where the punch is, and
+  the bin holds one stamped blank for every index so far.
 
 One crank revolution is one part: the belt indexes one station while the ram is
 at the top, then the ram comes down on a blank the Geneva lock is holding still.
 
-**How it is lit.** Each hanging bulb is one positional `GL_LIGHT`, switched by
-the same flag that draws its glass lit or dark, over an ambient floor that
-keeps the far corners off black. Each is a spotlight pointing straight down,
+**How it is lit.** Three lights over a warm ambient floor, which stands for
+the light bounced off the walls. Each hanging bulb is one positional
+`GL_LIGHT`, switched by the same flag that draws its glass lit or dark. Each is a spotlight pointing straight down,
 cut off at 90° by its flat shade and fading as `cos^0.5` towards that edge, so
 nothing above a bulb is lit by it and the upper walls and the ceiling get the
 ambient light alone. Its
 light is also divided by `a0 + a1·d + a2·d²` with distance, so the walls far
-from a bulb get less of it than the machine under it. A material
-(`materials.h`) is a colour plus the
+from a bulb get less of it than the machine under it. The third light is cool
+daylight from the windows: a directional light (`w = 0`), so it has a
+direction but no position and no attenuation, from the front left and above.
+Warm bulbs against a cool fill give every part a lit side and a shaded side.
+A material (`materials.h`) is a colour plus the
 specular colour `ks` and exponent `ns`; brass, polished silver, copper and
 black plastic take theirs from the slides' coefficient table.
 `GL_COLOR_MATERIAL` turns the colour into ambient and diffuse, and
@@ -80,6 +86,27 @@ same equation from the same lights and materials (`gl_LightSource`,
 `gl_FrontMaterial`), so switching modes changes only *where* the lighting is
 worked out. The difference shows where light changes inside one face: the
 spotlight's edge crossing a wall tile, or a highlight on the drive panel.
+
+**Ray-traced shadows** (`s` to SHADOW RAYS, the default; `shadows.h`). Ray
+tracing is on the slides as a shading method in which each pixel follows its
+own ray (Whitted ray tracing, using the Phong model). Here the rasterizer
+finds the point each pixel sees, and the Phong program then traces one
+*shadow ray* from that point to each bulb. If the ray hits a part on the way,
+that bulb adds no diffuse or specular light there, so the point is in its
+shadow. The parts are listed in `shadows.h` as about forty boxes and
+cylinders, rebuilt every frame from the same numbers they are drawn with, so
+the moving ram and blanks cast moving shadows. A box is tested with the slab
+test, and a cylinder by solving a quadratic for where the ray meets its
+circle. Both find the stretch of the ray inside the shape, and the ray is
+blocked if that stretch lies between the point and the bulb. Two bulbs give
+two overlapping shadows, darker where both are blocked. The daylight casts
+none: it stands for soft sky light. On this machine's Intel UHD it runs at
+about 140–290 frames a second, against about 370 without the shadows.
+
+What is *not* traced: primary rays (the rasterizer does that part),
+reflection and refraction rays (the other half of Whitted's method), and the
+shapes of small or thin parts such as cleats, the rod, the Geneva arms and the
+gear teeth.
 
 ## Build and run
 
@@ -109,15 +136,15 @@ or, from the MSYS2 shell: `make`, `make run`, `make release`.
 
 | Key | Action |
 |---|---|
-| `←` `→` | orbit the camera |
-| `1` `2` | three-quarter view of the line / the whole room |
+| `←` `→` | orbit the camera, up to a quarter turn each way |
+| `1` `2` | three-quarter view of the line / the room from its front corner |
 | `c` | free camera on / off, starting from the current view |
 | free camera: `↑` `↓` | fly forward / back |
 | free camera: `←` `→` | turn left / right |
 | free camera: `PgUp` `PgDn` | rise / sink |
 | `r` | reset: crank back to the start, camera back on view 1 |
 | `e` | edge lines on / off |
-| `s` | shading: flat → Gouraud → Phong (per pixel) |
+| `s` | shading: flat → Gouraud → Phong (per pixel) → shadow rays |
 | `Space` | machine switch — starts and stops the line |
 | `[` `]` | left / right bulb on / off |
 | `f` | exhaust fan switch |
@@ -170,8 +197,9 @@ Three details make it work:
 - Back-face culling and the depth test still apply to lines, so hidden edges stay hidden.
 
 **6. Viewing.** `1` and `2` are two `gluLookAt` presets, and `←` `→` orbit the
-eye about the look-at point. The walls between the camera and the machine
-disappear as it orbits. `c` hands the same eye to a free camera, which flies
+eye about the look-at point, at most 90° each way. The eye never leaves the
+room: where an orbit would take it through a wall, it slides along the wall
+instead. `c` hands the same eye to a free camera, which flies
 level: its view direction is one yaw angle, the arrows fly it and turn it, and
 that is the way to get in close to one mechanism while talking about it.
 
@@ -246,42 +274,47 @@ small panel listing the four switches, and a key hint. Nothing else: speed and
 a parts count would both be meaningless here.
 
 **There is a room** (`room.h`). The PRD says "no factory building". The line
-now stands in a 15 × 8 × 9.5 workshop. Each wall, and everything fixed to it, is
-drawn only while the eye is on the room side of that wall, so the walls nearest
-the camera vanish at every orbit angle, and the ceiling goes whenever the eye
-is above it. Back-face culling alone hides a bare inward-facing wall but not the
-boxes mounted on it. Consequences elsewhere:
+now stands in a 23 × 16 × 9.5 workshop: x −10 → 13, z −2.5 → 13.5, with the
+back wall still just behind the drive panel. Every camera is locked inside it.
+`keep_inside()` in `camera.h` clamps the eye to a box 0.5 inside the walls and
+between heights 0.3 and 8.5, under the ceiling beams. The presets call it after
+the orbit, and the free camera after every move. All four walls and the ceiling
+are therefore drawn every frame; there is no cutaway. Consequences elsewhere:
 
-- The **far plane is 40**, not 25: in the overview preset the furthest room corner
-  is at a depth of 29, and 30 at worst while orbiting. far/near is 10.
+- **One near plane, 0.2, for every view.** The eye can be pressed against a wall
+  next to the cabinet or the drums, so the old 4.0 near plane of the presets
+  would slice them. The far plane is 40: nothing in the room is more than 30
+  from an eye inside it. far/near is 200, and a 24-bit depth step at 30 is
+  0.00027, so the hazard marks, 0.004 above the floor, stay about fifteen
+  steps clear.
+- **The orbit stops at 90° each way.** The back wall is 1.45 behind the panel,
+  so an eye orbited behind the machine would only see the back of the panel
+  from close up.
 
-**A free camera** (`c`, `camera.h`). It flies right up to the parts, so it
-switches the near plane from 4.0 to 0.2 while it is on, and far/near becomes
-200. To keep that safe it stays within 22 of the room's centre and below a
-height of 20. Every room corner then stays within a depth of 36.5, and a 24-bit
-depth step there is 0.0004, so the hazard marks, 0.004 above the floor, stay
-about ten steps clear. It moves at speed × `dt` from held keys, not on key
-repeat, so it is frame-rate independent, like the machine. Walls hide the same way as in the presets: fly out
-through a wall and it disappears.
-- The **floor grows** to the room, in 1.0 tiles (15 × 8).
+**A free camera** (`c`, `camera.h`). It flies level, at speed × `dt` from held
+keys, not on key repeat, so it is frame-rate independent, like the machine.
+The walls, the floor and the beams stop it, through the same `keep_inside()`.
+- The **floor grows** to the room, in 1.0 tiles (23 × 16).
 - **Eight room colours** are added (wall paint, safety yellow, wood, signal
   red, galvanized steel, window glass, and a bulb lit and unlit).
 - The **fan** keeps its own angle, off the machine's clock, and spins while its
   switch is on.
 - **Build once, draw many.** A window, an I-beam, a pendant lamp, a pallet and
-  a drum are each one display list, drawn nine, five, two, two and two times.
+  a drum are each one display list, drawn seventeen, seven, two, two and two times.
   The drum list sets no colour, so each copy is coloured just before its call.
-- The spare gears on the shelf and the blanks on both pallets use the
-  machine's own lists and its `draw_blank()`, so they are exactly the parts
-  they stand in for. The stamped pallet's blanks get the same squash as those
-  on the belt.
+- The spare gears on the shelf and the blanks on both pallets and in the bin
+  use the machine's own lists and its `draw_blank()`, so they are exactly the
+  parts they stand in for. The stamped ones get the same squash as those on the
+  belt.
 
-**No discharge chute and no collection bin.** On the animated branches a
-finished part rides over the head roller, is tossed onto a chute, slides down
-and drops into a bin that piles 36. The belt here recycles its blanks along the
-top run rather than carrying them over the roller, so both stood empty for the
-whole run and have been taken out. The code for the exit is on `unlit-demo`
-and `main`.
+**A collection bin, with no chute.** On `main` a finished part is tossed off
+the head roller onto a chute, slides down it and drops into a bin. Here the bin
+is an open box of five `box_span`s just past the head roller. The finished
+blank waits on top of the roller, and during the next index it falls into the
+bin. y goes as u², a fall, and x as 1 − (1 − u)³, the push off the belt, where
+u is the time through the index. It lands as the index ends. Every index
+carries one blank off, so the bin simply holds `floor(B)` blanks, 3 × 3 a layer
+as on the pallets, up to 36, and then stays full.
 
 **No feed magazine and no exit hood.** Both were plain black plates over the
 belt that did nothing to the blanks, so they have been taken out.
@@ -299,14 +332,15 @@ belt that did nothing to the blanks, so they have been taken out.
 | `src/press.h` | the drive panel and the crank-slider press (FR-4) |
 | `src/geneva.h` | the driver arm and the four-slot wheel (FR-5) |
 | `src/conveyor.h` | frame, rollers, belt, cleats (FR-6) |
-| `src/blanks.h` | the workpieces and the squash (FR-7) |
+| `src/blanks.h` | the workpieces, the squash (FR-7), the bin and the fall into it |
 | `src/fixtures.h` | floor, motor, stack light |
 | `src/scene.h` | assembles those six into the machine: build order, draw order |
-| `src/room.h` | the cutaway workshop: walls, windows, beams, lamps, pallets, drums, cabinet switches, fan |
+| `src/room.h` | the workshop: walls, windows, beams, lamps, pallets, drums, cabinet switches, fan |
 | `src/camera.h` | two preset views, orbit, the level free camera |
 | `src/hud.h` | the switch panel and the key hint |
-| `src/shading.h` | flat, Gouraud and the per-pixel Phong program (GLSL 1.10) |
-| `src/main.cpp` | GLUT glue, GLEW, the clock, the spotlights, input, the fill and edge passes |
+| `src/shading.h` | flat, Gouraud, and the per-pixel Phong program with its shadow rays (GLSL 1.10) |
+| `src/shadows.h` | the shapes the shadow rays are traced against, rebuilt each frame |
+| `src/main.cpp` | GLUT glue, GLEW, the clock, the spotlights and daylight, input, the fill and edge passes |
 | `PRD.md` | the requirements document this implements |
 | `docs/OBJECTS.md` | every object and where its numbers came from |
 | `docs/DEMO-CHANGES.md` | how to change things during a demonstration |

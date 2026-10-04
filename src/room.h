@@ -16,8 +16,8 @@ constexpr float SWITCH_RGB[SW_COUNT][3] = {
     { 1.00f, 0.72f, 0.20f }, { 0.30f, 0.70f, 1.00f } };
 
 // Parts built once and drawn several times.
-inline GLuint window_list;        // one window: nine on the walls
-inline GLuint beam_list;          // one ceiling I-beam: five
+inline GLuint window_list;        // one window: seventeen on the walls
+inline GLuint beam_list;          // one ceiling I-beam: seven
 inline GLuint lamp_list;          // one pendant, flex and shade: two
 inline GLuint globe_list;         // one bulb globe, coloured each frame: two
 inline GLuint pallet_list;        // one empty pallet: two
@@ -46,15 +46,6 @@ inline float back_u (float x) { return x - ROOM_X0; }
 inline float left_u (float z) { return ROOM_Z1 - z; }
 inline float right_u(float z) { return z - ROOM_Z0; }
 inline float front_u(float x) { return ROOM_X1 - x; }
-
-inline bool wall_shown(int w, const float* eye) {
-    switch (w) {
-    case BACK:  return eye[2] > ROOM_Z0;
-    case LEFT:  return eye[0] > ROOM_X0;
-    case RIGHT: return eye[0] < ROOM_X1;
-    default:    return eye[2] < ROOM_Z1;
-    }
-}
 
 inline void wall_surface(float len) {
     const int nu = (int)(len / WALL_CELL + 0.5f);
@@ -347,27 +338,23 @@ inline void draw_switches(const bool* sw) {
     }
 }
 
-inline void draw(const float* eye, const bool* sw, float fan_deg,
-                 bool edge_pass) {
+// The camera never leaves the room (camera.h), so all four walls and the
+// ceiling are drawn every frame.
+inline void draw(const bool* sw, float fan_deg, bool edge_pass) {
     glCallList(floor_items_list);
     draw_switches(sw);
 
-    for (int w = BACK; w <= FRONT; ++w) {
-        if (!wall_shown(w, eye)) continue;
-        glCallList(wall_list[w]);
-        if (w != BACK) continue;
-        glPushMatrix();
-        enter_wall(BACK);
-        glTranslatef(back_u(FAN_X), FAN_Y, 0.0f);
-        glRotatef(fan_deg, 0, 0, 1);
-        glCallList(fan_list);
-        glPopMatrix();
-    }
+    for (int w = BACK; w <= FRONT; ++w) glCallList(wall_list[w]);
+    glPushMatrix();                                      // the fan rotor
+    enter_wall(BACK);
+    glTranslatef(back_u(FAN_X), FAN_Y, 0.0f);
+    glRotatef(fan_deg, 0, 0, 1);
+    glCallList(fan_list);
+    glPopMatrix();
 
-    if (eye[1] < CEIL_Y) glCallList(ceiling_list);      // from above, it goes
+    glCallList(ceiling_list);
 
-    // The lamps hang inside the room, so they stay in every view.  A lit
-    // globe glows (emission); the edge pass leaves it without an outline.
+    // A lit globe glows (emission); the edge pass leaves it without an outline.
     for (int i = 0; i < 2; ++i) {
         glPushMatrix();
         glTranslatef(BULB_X[i], BULB_Y, BULB_Z);

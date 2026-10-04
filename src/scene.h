@@ -19,6 +19,7 @@ inline void build_lists() {
     build_geneva();
     build_conveyor();
     build_blanks();
+    build_bin();
 }
 
 inline void draw(float th, long turns) {
@@ -35,6 +36,7 @@ inline void draw(float th, long turns) {
     draw_geneva_driver(th);   // geneva.h    - chain C
     draw_conveyor(B);         // conveyor.h  - chain D, and the Geneva wheel
     draw_blanks(th, B);       // blanks.h    - the squash branch of chain D
+    draw_bin(th, B);          // blanks.h    - off the head roller, into the bin
     draw_stack_light();       // fixtures.h
 }
 

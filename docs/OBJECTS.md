@@ -42,7 +42,7 @@ radians. `DEG` and `RAD` convert.
 | **solved** | a literal in `config.h` that was *calculated once* and written down, and that other geometry depends on. Section 7 lists these; they are the dangerous ones. |
 
 **Build once, draw many.** Fixed geometry goes into an OpenGL display list at
-startup ([main.cpp:162](../src/main.cpp#L162)) and is replayed each frame.
+startup ([main.cpp:170](../src/main.cpp#L170)) and is replayed each frame.
 Anything that changes with the clock is built fresh every frame instead. Each
 mechanism file has a `build_*` for the first kind and a `draw_*` for the
 second. Each list is a named `GLuint` at the top of its file, such as
@@ -78,12 +78,12 @@ receding in perspective — while a window pane is one cell.
 ## 3. The one clock
 
 The entire machine is a function of two values held in
-[main.cpp:19](../src/main.cpp#L19):
+[main.cpp:20](../src/main.cpp#L20):
 
 - `theta` — the crank angle in radians;
 - `turns` — how many whole revolutions of it have finished.
 
-`idle()` ([main.cpp:92](../src/main.cpp#L92)) does nothing but
+`idle()` ([main.cpp:100](../src/main.cpp#L100)) does nothing but
 
 ```
 theta += CRANK_DPS * dt * RAD        // CRANK_DPS = 72 deg/s, so 5 s a cycle
@@ -280,13 +280,15 @@ which is continuous across both joins.
 
 ### 4.8 Blanks — `build_blanks` / `draw_blanks` [blanks.h:12](../src/blanks.h#L12), [blanks.h:31](../src/blanks.h#L31)
 
-One `cyl` list, drawn nine times. `BLANK_R` = 0.18, `BLANK_H` = 0.20,
+One `cyl` list, drawn for every blank: nine on the belt, nine on each pallet,
+and the ones in the bin or on their way to it. `BLANK_R` = 0.18, `BLANK_H` = 0.20,
 `BLANK_H_FLAT` = 0.10, all typed.
 
 Position: slot *j* sits at `station_x(j) + frac(B)·p`. When `B` passes a whole
 number every blank has moved up one station, so the blank drawn at slot *j*
-takes over the place slot *j−1* just left — one leaves at the head roller, one
-arrives at station 1, and nothing in between appears to move.
+takes over the place slot *j−1* just left — one reaches the head roller, where
+`draw_bin` takes it over, one arrives at station 1, and nothing in between
+appears to move.
 
 Height is read straight off where the blank stands and where the punch is,
 with no per-blank state at all ([layout.h:119](../src/layout.h#L119)):
@@ -301,7 +303,42 @@ The squash is `glScalef(1, h/BLANK_H, 1)` about the blank's base. It is the
 only `glScalef` in the machine, and it is a non-uniform scale, which is why
 `GL_NORMALIZE` is on.
 
-### 4.9 Stack light — `draw_stack_light` [fixtures.h:44](../src/fixtures.h#L44)
+### 4.9 Bin — `build_bin` / `draw_in_bin` / `draw_bin` [blanks.h:43](../src/blanks.h#L43), [blanks.h:60](../src/blanks.h#L60), [blanks.h:76](../src/blanks.h#L76)
+
+An open box just past the head roller: a floor and four walls, five
+`box_span`, in one list. `BIN_X` 5.40, `BIN_Z` 0.00, `BIN_S` 1.30, `BIN_H` 0.50,
+`BIN_T` 0.05, all typed.
+
+Every index carries one blank off the head roller, so after `B` indexes the bin
+holds `floor(B)` blanks. There is no counter and no per-blank state, and the
+count stops at 36 (`BIN_LAYERS` × 9). They lie 3 × 3 a layer at `PAL_PITCH`, as
+on the pallets, each `BLANK_H_FLAT` tall.
+
+One routine, `draw_in_bin(i, u)`, draws blank *i* of the pile. At `u` = 1 it
+sits in its slot, which is how every blank already in the bin is drawn. At
+`u` = 0 it sits on top of the head roller, at station 10. The next blank, number
+`floor(B)`, waits there while the belt is locked and falls during the next
+index, with `u` the time through that index:
+
+```
+u    = (α + 45°) / 90°                  0 → 1 while the belt indexes
+y    = top + (slot − top)·u²            a fall: slow, then fast
+x, z = top + (slot − top)·(1 − (1 − u)³)  the push off the belt: fast, then slow
+```
+
+It lands just as the index ends, which is the moment `floor(B)` counts it in.
+When the bin is full, each new blank lands on the top slot, which is already
+drawn.
+
+The blank stays flat as it falls. x is pushed out fast so the blank is clear of
+the roller before it has dropped far; with `(1 − u)²` its back edge sank 0.064
+into the belt. Checked numerically for all 36 slots, it clears the Geneva shaft
+by 0.16, the bin walls by 0.04 and the blanks already in the pile by 0.013. A
+flat disc that starts lying on the roller cannot leave it without a small dip:
+for the column nearest the roller, its back edge dips up to 0.018 into the
+belt for the first 0.13 s.
+
+### 4.10 Stack light — `draw_stack_light` [fixtures.h:44](../src/fixtures.h#L44)
 
 A post (`cyl`), a housing (`cyl`), and three lens segments from one list. Green,
 amber, red upward. `i == 0` ([fixtures.h:61](../src/fixtures.h#L61)) picks
@@ -319,12 +356,11 @@ reflects.
 All in [room.h](../src/room.h). The room is not in the PRD; it is a deviation,
 recorded in the README.
 
-**The cutaway.** A wall, and everything mounted on it, is drawn only while the
-eye is on the room side of that wall's plane
-(`wall_shown`, [room.h:50](../src/room.h#L50)). So the walls between the camera
-and the machine vanish as it orbits and the far ones stay. Back-face culling
-alone would hide the bare wall surfaces, but not the boxes fixed to them — a
-window frame would float in front of the machine.
+**No cutaway.** Every camera is locked inside the room (`keep_inside`,
+[camera.h:25](../src/camera.h#L25)), so all four walls and the ceiling are drawn
+every frame. The room is 23 × 16 × 9.5: x −10 → 13, z −2.5 → 13.5. The back
+wall is still just behind the drive panel; the room grew to the left, the right
+and the front.
 
 **Wall frames.** Each wall is built in its own frame: `u` runs along the wall
 left to right as seen from inside, `y` is up, `z` points out of the wall into
@@ -333,7 +369,7 @@ then serves all four walls. `back_u`/`left_u`/`right_u`/`front_u`
 ([room.h:45](../src/room.h#L45)) convert a world coordinate into that wall's `u`.
 
 **Build once, draw many.** Every room part that appears more than once is one
-display list, recorded once in `build_lists()` ([room.h:280](../src/room.h#L280))
+display list, recorded once in `build_lists()` ([room.h:271](../src/room.h#L271))
 and placed with a `glTranslatef` per copy. The parts are built first, because
 a list that calls another records its id when it is compiled.
 
@@ -348,22 +384,22 @@ a list that calls another records its id when it is compiled.
 
 | Object | Built from | Line | Key numbers |
 |---|---|---|---|
-| Floor | `tiles_y`, 15 × 8 cells of 1.0 | [fixtures.h:17](../src/fixtures.h#L17) | `ROOM_X0/X1/Z0/Z1` typed — the floor is the room's footprint |
-| Wall surface | two `tiles_z` bands + a trim `box_span` | [room.h:59](../src/room.h#L59) | `DADO_H` 1.20, `CEIL_Y` 9.5 typed |
-| Frame | four `box_span` bars round an opening | [room.h:72](../src/room.h#L72) | shared by the windows and the fan housing |
-| Window ×9 | one glowing `tiles_z` pane + `frame()` + a cross bar | [room.h:81](../src/room.h#L81) | `WIN_W` 1.80, `WIN_H` 1.80, `WIN_BAR` 0.05 typed |
-| Ceiling | `tiles_y` facing **down** + the beams | [room.h:147](../src/room.h#L147) | — |
-| I-beam ×5 | three `box_span` (flange, web, flange) | [room.h:139](../src/room.h#L139) | `BEAM_X0` −3.90, `BEAM_PITCH` 3.00 |
-| Pendant lamp ×2 | thin `cyl` flex + two `cyl` for the shade | [room.h:163](../src/room.h#L163) | `BULB_X[2]`, `BULB_Y` 6.60, `SHADE_R` 0.30 |
-| Bulb globe ×2 | `cyl` radius `BULB_R` | [room.h:174](../src/room.h#L174) | glows when on, dark glass when off |
-| Hazard border | four `tiles_y` strips, 0.004 proud | [room.h:187](../src/room.h#L187) | `HAZ_*` typed |
-| Pallet ×2 | 3 bearers + 5 deck boards | [room.h:197](../src/room.h#L197) | `PAL_S` 1.20, `PAL_TOP` 0.13 typed |
-| Load of blanks ×2 | 9 × `scene::draw_blank()` | [room.h:212](../src/room.h#L212) | raw (`BLANK_H`) by the tail, stamped (`BLANK_H_FLAT`) by the head |
-| Cabinet | one `box_span` + door seam + four switch plates | [room.h:228](../src/room.h#L228) | `CAB_X0/X1/H/D` typed |
-| Drum ×2 | `cyl` body + three `cyl` hoops | [room.h:242](../src/room.h#L242) | `DRUM_R` 0.30, `DRUM_H` 0.88 |
-| Spare-gear shelf | `box_span` shelf + 2 brackets + 2 gears | [room.h:123](../src/room.h#L123) | calls `scene::gear_shape()` |
-| Exhaust fan | housing (`frame()` + grille) + 6-blade rotor | [room.h:106](../src/room.h#L106), [room.h:263](../src/room.h#L263) | `FAN_BLADES` 6 |
-| Switch lamps ×4 | `cyl_z`, glowing when on | [room.h:338](../src/room.h#L338) | colours shared with the HUD |
+| Floor | `tiles_y`, 23 × 16 cells of 1.0 | [fixtures.h:17](../src/fixtures.h#L17) | `ROOM_X0/X1/Z0/Z1` typed — the floor is the room's footprint |
+| Wall surface | two `tiles_z` bands + a trim `box_span` | [room.h:50](../src/room.h#L50) | `DADO_H` 1.20, `CEIL_Y` 9.5 typed |
+| Frame | four `box_span` bars round an opening | [room.h:63](../src/room.h#L63) | shared by the windows and the fan housing |
+| Window ×17 | one glowing `tiles_z` pane + `frame()` + a cross bar | [room.h:72](../src/room.h#L72) | `WIN_W` 1.80, `WIN_H` 1.80, `WIN_BAR` 0.05 typed |
+| Ceiling | `tiles_y` facing **down** + the beams | [room.h:138](../src/room.h#L138) | — |
+| I-beam ×7 | three `box_span` (flange, web, flange) | [room.h:130](../src/room.h#L130) | `BEAM_X0` −7.00, `BEAM_PITCH` 3.00 |
+| Pendant lamp ×2 | thin `cyl` flex + two `cyl` for the shade | [room.h:154](../src/room.h#L154) | `BULB_X[2]`, `BULB_Y` 6.60, `SHADE_R` 0.30 |
+| Bulb globe ×2 | `cyl` radius `BULB_R` | [room.h:165](../src/room.h#L165) | glows when on, dark glass when off |
+| Hazard border | four `tiles_y` strips, 0.004 proud | [room.h:178](../src/room.h#L178) | `HAZ_*` typed |
+| Pallet ×2 | 3 bearers + 5 deck boards | [room.h:188](../src/room.h#L188) | `PAL_S` 1.20, `PAL_TOP` 0.13 typed |
+| Load of blanks ×2 | 9 × `scene::draw_blank()` | [room.h:203](../src/room.h#L203) | raw (`BLANK_H`) by the tail, stamped (`BLANK_H_FLAT`) by the head |
+| Cabinet | one `box_span` + door seam + four switch plates | [room.h:219](../src/room.h#L219) | `CAB_X0/X1/H/D` typed |
+| Drum ×2 | `cyl` body + three `cyl` hoops | [room.h:233](../src/room.h#L233) | `DRUM_R` 0.30, `DRUM_H` 0.88 |
+| Spare-gear shelf | `box_span` shelf + 2 brackets + 2 gears | [room.h:114](../src/room.h#L114) | calls `scene::gear_shape()` |
+| Exhaust fan | housing (`frame()` + grille) + 6-blade rotor | [room.h:97](../src/room.h#L97), [room.h:254](../src/room.h#L254) | `FAN_BLADES` 6 |
+| Switch lamps ×4 | `cyl_z`, glowing when on | [room.h:329](../src/room.h#L329) | colours shared with the HUD |
 
 Three room objects deliberately **reuse the machine's own parts**, so they are
 exactly the parts they represent: the spare gears on the shelf are drawn by
@@ -371,7 +407,7 @@ exactly the parts they represent: the spare gears on the shelf are drawn by
 loaded by `scene::draw_blank()` from `blank_list` — the stamped load with the
 same squash the belt uses. That is why
 `room::build_lists()` has to run *after* `scene::build_lists()`
-([main.cpp:162](../src/main.cpp#L162)).
+([main.cpp:170](../src/main.cpp#L170)).
 
 **The fan** is the one moving part not on the machine's clock: it keeps its own
 `fan_deg`, advanced in `idle()` while its switch is on.
@@ -405,6 +441,8 @@ tail roller                     HEAD_X − 10p
 loop length                     24p
 roller / wheel angle            −90°·B
 blank height                    clamp(punch_face − BELT_TOP_Y, FLAT, FULL)
+blanks in the bin               min(floor(B), 36)
+falling blank       u         = (α + 45°)/90°, y ∝ u², x and z ∝ 1 − (1 − u)³
 ```
 
 **Checked numerically** over ten crank revolutions: belt travel never runs
@@ -438,6 +476,8 @@ colours, `BLANK_R`, panel and motor sizes.
 | `CRANK_R`, `ROD_L`, `RAM_H` | the stroke, and the punch gap at the bottom — which is what makes a stamped blank exactly `BLANK_H_FLAT` tall. |
 | `POSE_DEG` (90°) | `PHI_DEG` was solved at this angle. Changing it rotates the whole train out of its solved pose. |
 | `PRESS_X` | station 7 is at exactly `PRESS_X`. The blank height rule compares against `PRESS_X`. |
+| `BIN_X`, `BIN_Z` | the falling blank aims at the bin wherever it is, but at x 5.4 it clears the Geneva shaft by 0.16. Much closer and it clips the shaft and dips further into the belt as it leaves the roller. |
+| `BIN_S`, `BIN_H` | the bin has to hold a 3 × 3 layer, so `BIN_S` ≥ 2·`PAL_PITCH` + 2·`BLANK_R` + 2·`BIN_T` = 1.22, and the full pile, so `BIN_H` ≥ `BIN_T` + `BIN_LAYERS`·`BLANK_H_FLAT` = 0.45. |
 
 ### How G3 and G4 were placed
 

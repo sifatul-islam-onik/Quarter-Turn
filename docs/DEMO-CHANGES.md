@@ -33,7 +33,7 @@ and run again.
 | change a colour | [materials.h](../src/materials.h) | one RGB triple per material |
 | change the line's speed | `CRANK_DPS` in [config.h](../src/config.h) | degrees of crank per second |
 | make things rounder / blockier | `CYL_SLICES` in [config.h](../src/config.h) | affects every cylinder |
-| change the lighting | [main.cpp:36](../src/main.cpp#L36) | four arrays: bulb diffuse, bulb specular, off, ambient |
+| change the lighting | [main.cpp:37](../src/main.cpp#L37) | four arrays: bulb diffuse, bulb specular, off, ambient |
 | move the camera | `EYE_*` / `AT_*` in [config.h](../src/config.h) | view `1`; `OVER_*` is view `2` |
 | change the window size | `win_w`, `win_h` in [camera.h:16](../src/camera.h#L16) | |
 | change the HUD text | [hud.h](../src/hud.h) `status_panel` | |
@@ -51,14 +51,15 @@ geometry depends on it (see §7 of [OBJECTS.md](OBJECTS.md)).
 
 ```cpp
 constexpr float DRUM_X[2] = { 7.25f, 8.05f }, DRUM_Z[2] = { -1.25f, -0.95f };
-constexpr float PAL_X = -4.10f, PAL_Z = 2.50f;      // the pallet
+constexpr float PAL_X[2] = { -4.10f, 5.40f }, PAL_Z[2] = { 2.50f, 2.70f };  // the pallets
+constexpr float BIN_X = 5.40f, BIN_Z = 0.00f;      // the bin
 constexpr float STACK_X = 5.50f, STACK_Z = -0.80f;  // the stack light
 constexpr float FAN_X = -1.70f, FAN_Y = 5.00f;      // the exhaust fan
 constexpr float CAB_X0 = 6.20f, CAB_X1 = 7.60f;     // the cabinet
 ```
 
 **To move the whole machine** without touching thirty constants, wrap the call
-in [main.cpp:30](../src/main.cpp#L30):
+in [main.cpp:31](../src/main.cpp#L31):
 
 ```cpp
 static void draw_world(bool edge_pass = false) {
@@ -85,7 +86,7 @@ constexpr float DRUM_R = 0.30f, DRUM_H = 0.88f;     // fatter, taller drums
 
 **Different number of sides:** `cyl` takes an optional slice count, so one
 object can be blockier than the rest. In `drum()` at
-[room.h:242](../src/room.h#L242):
+[room.h:233](../src/room.h#L233):
 
 ```cpp
 cyl(DRUM_R, DRUM_H, 6);      // hexagonal drums; default is CYL_SLICES = 10
@@ -139,7 +140,7 @@ constexpr float CRANK_DPS = 72.0f;    // 5 s per cycle. 36 = slow, 180 = fast
 `Space` stops and starts the line at any time — no rebuild needed, and the best
 way to freeze a mechanism mid-explanation.
 
-**To add single-stepping**, in `keyboard()` at [main.cpp:112](../src/main.cpp#L112):
+**To add single-stepping**, in `keyboard()` at [main.cpp:120](../src/main.cpp#L120):
 
 ```cpp
 case '.': theta += 5.0f * RAD;                 // nudge the crank 5 degrees
@@ -155,13 +156,15 @@ engaging.
 
 ## Recipe 5 — the lighting
 
-Four arrays at [main.cpp:36](../src/main.cpp#L36):
+The arrays at [main.cpp:37](../src/main.cpp#L37):
 
 ```cpp
 static const GLfloat BULB_DIFFUSE[4]  = { 0.85f, 0.80f, 0.70f, 1.0f };  // each bulb
 static const GLfloat BULB_SPECULAR[4] = { 0.90f, 0.88f, 0.82f, 1.0f };  // its highlights
 static const GLfloat LIGHT_OFF[4]     = { 0.00f, 0.00f, 0.00f, 1.0f };  // switched off
-static const GLfloat ROOM_AMBIENT[4]  = { 0.42f, 0.42f, 0.45f, 1.0f };  // the floor
+static const GLfloat ROOM_AMBIENT[4]  = { 0.33f, 0.32f, 0.30f, 1.0f };  // the floor
+static const GLfloat DAYLIGHT[4]     = { 0.30f, 0.33f, 0.40f, 1.0f };  // cool window light
+static const GLfloat DAYLIGHT_DIR[4] = { -0.45f, 0.75f, 0.50f, 0.0f }; // w = 0: a direction
 ```
 
 and in `config.h`, the slides' attenuation `1 / (a0 + a1·d + a2·d²)` and the
@@ -176,6 +179,10 @@ constexpr float BULB_SPOT_EXP = 0.5f;   // cos^a falloff towards the edge
 - **Scene too dark / too flat** — raise or lower `ROOM_AMBIENT`. High ambient
   washes the shading out; low ambient makes the switches dramatic.
 - **Warmer bulbs** — push `BULB_DIFFUSE` red up and blue down.
+- **Show the directional light** — press `[` and `]` to turn both bulbs off.
+  What is left is the daylight: the floor, the back wall and the right wall
+  are lit evenly, wherever they are, and the left wall, which faces away from
+  it, is not. Change `DAYLIGHT_DIR` to swing it round.
 - **Show that the lights are real** — press `[` and `]`. The shading across the
   whole room changes, not just the bulb.
 - **Show attenuation** — set `BULB_A1` and `BULB_A2` to 0 and rebuild: the far
@@ -188,12 +195,17 @@ constexpr float BULB_SPOT_EXP = 0.5f;   // cos^a falloff towards the edge
   `BULB_CUTOFF` 60 and its edge becomes a curve across each wall, but the
   gears near the top drop out of it. Set `BULB_CUTOFF` to 180 to make the bulbs
   plain point lights again.
-- **Show the three shadings** — press `s`: flat, then Gouraud, then Phong.
+- **Show the shadings** — press `s`: flat, Gouraud, Phong, shadow rays.
   Flat gives each face one colour, so the wall tiles and every cylinder's sides
   turn into visible facets. Gouraud against Phong is clearest on the walls in
   view `2`: Phong keeps the fade at the bulbs' height a tight band, Gouraud
   smears it over a whole row of tiles. Try it with `BULB_CUTOFF` 60 too: the
   curved edge comes out in tile-sized steps under Gouraud.
+- **Show the ray-traced shadows** — press `s` from PHONG to SHADOW RAYS. The
+  conveyor, the panel, the cabinet and the drums drop shadows on the floor
+  and walls, the gears and crank disc on the panel, and there are two of each,
+  one per bulb. Switch one bulb off and its set of shadows goes. Start the
+  line: the ram's and the blanks' shadows move with them.
 - **Move a bulb** — `BULB_X[2]`, `BULB_Y`, `BULB_Z` in `config.h`. The light and
   the glass both follow, because `place_lights()` reads the same constants.
   Keep `BULB_Y` above 6.3, the top of the pinion and the motor: anything
@@ -223,7 +235,7 @@ inline void toolbox() {
 }
 ```
 
-**2.** Call it from `build_lists()` ([room.h:280](../src/room.h#L280)), inside
+**2.** Call it from `build_lists()` ([room.h:271](../src/room.h#L271)), inside
 the floor-items list:
 
 ```cpp
@@ -238,7 +250,14 @@ glEndList();
 ```
 
 **3.** Rebuild. That is all — it is lit, outlined by the edge pass, and depth
-tested automatically, because it used the shared primitives. Those coordinates
+tested automatically, because it used the shared primitives. To make it cast
+a ray-traced shadow too, add the same box to `room_parts()` in `shadows.h`:
+
+```cpp
+box(-2.60f, 0.00f, 2.10f,  -2.00f, 0.35f, 2.50f);         // the toolbox
+```
+
+The body is enough; the handle is too small to matter. Those coordinates
 put it on the floor beside the pallet, in frame in the default view.
 
 *(Both this and the single-step key in Recipe 4 were compiled and run before
@@ -264,7 +283,7 @@ records the part's id when it is compiled.
 
 **If it should hang on a wall instead**, put the call inside that wall's list in
 the `for` loop just below, and use the wall's own frame (`u` along the wall, `y`
-up, `z` out into the room). It then inherits the cutaway for free.
+up, `z` out into the room).
 
 **If it should move**, do not put it in a list at all — draw it from
 `room::draw()` and give it an angle from `fan_deg` or the machine's `theta`.
@@ -287,16 +306,18 @@ properly because they were never coming back.
 ```cpp
 constexpr float EYE_X = 7.0f, EYE_Y = 6.2f, EYE_Z = 9.0f;   // view 1, the eye
 constexpr float AT_X  = 1.4f, AT_Y  = 2.9f, AT_Z  = 0.0f;   // view 1, look-at
-constexpr float OVER_EYE_X = 14.5f, ...                     // view 2, the room
+constexpr float OVER_EYE_X = 12.2f, ...                     // view 2, a corner
 ```
 
 Live, without rebuilding: `1` / `2` presets, `←` `→` orbit, `c` for the free
 camera (then arrows fly, PgUp/PgDn rise and sink), `r` to reset.
 
-> **The free camera has its own near plane** (`FREE_ZNEAR` 0.2 against `ZNEAR`
-> 4.0). That is why you can fly right up to a gear in free mode but the preset
-> views clip if you move them too close. If you move `EYE_*` in and geometry
-> starts getting sliced away, that is the near plane, not a bug.
+> **Every eye stays inside the room.** `keep_inside()` in `camera.h` clamps it
+> to `CAM_MARGIN` (0.5) inside the walls and between `CAM_Y_MIN` and `CAM_Y_MAX`.
+> If you put `EYE_*` outside the room, the view is pulled back in to the nearest
+> wall, not shown from outside. The orbit stops at `ORBIT_MAX` (90°) each way.
+> One near plane, `ZNEAR` 0.2, serves every view, so the camera can go right up
+> to a gear.
 
 ---
 
@@ -308,7 +329,7 @@ rebuild *and* a restart. Nothing in this program re-reads a file at runtime.
 **2. Back-face culling is on.** If a new face is invisible from the side you
 expected, you wound it the wrong way round — reverse the vertex order. To
 confirm that is the cause, comment out `glEnable(GL_CULL_FACE)` in
-[main.cpp:162](../src/main.cpp#L162); if the face appears, it is winding.
+[main.cpp:170](../src/main.cpp#L170); if the face appears, it is winding.
 
 **3. Lighting needs normals.** The six primitives all emit them. If you write a
 raw `glBegin`/`glEnd` block yourself and forget `glNormal3f`, the object
@@ -336,8 +357,8 @@ surface shimmers as the camera moves, that is what it is.
 | object appears from one side only | winding — see bite #2 |
 | object is flat black | no normals, or it is facing away from both bulbs with ambient turned down |
 | object shimmers / flickers | z-fighting with a coincident surface — nudge it |
-| geometry sliced away near the camera | the near plane (`ZNEAR` 4.0 in preset views) |
-| a wall or its fittings vanish | working as intended — that is the cutaway |
+| geometry sliced away near the camera | the near plane (`ZNEAR` 0.2) |
+| the camera will not go further | working as intended — it is held inside the room |
 | teeth stop meshing, pin cuts the wheel arms | you changed a coupled number — see §7 of [OBJECTS.md](OBJECTS.md) |
 
 ---

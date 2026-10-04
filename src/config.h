@@ -12,16 +12,21 @@ constexpr int   CYL_SLICES = 10;      // [free] sides on every cylinder
 // ---- Camera [free] ---------------------------------------------------------
 constexpr float EYE_X = 7.0f, EYE_Y = 6.2f, EYE_Z = 9.0f;     // view 1
 constexpr float AT_X  = 1.4f, AT_Y  = 2.9f, AT_Z  = 0.0f;
-constexpr float FOVY  = 45.0f, ZNEAR = 4.0f, ZFAR = 40.0f;
+// The eye never leaves the room, so it can always be close to something:
+// one small near plane for every view.  40 still reaches the far corner (30).
+constexpr float FOVY  = 45.0f, ZNEAR = 0.2f, ZFAR = 40.0f;
 
-constexpr float OVER_EYE_X = 14.5f, OVER_EYE_Y = 7.0f, OVER_EYE_Z = 17.0f;  // view 2
-constexpr float OVER_AT_X  = 1.5f,  OVER_AT_Y  = 3.6f, OVER_AT_Z  = 1.0f;
+constexpr float OVER_EYE_X = 12.2f, OVER_EYE_Y = 8.4f, OVER_EYE_Z = 12.7f;  // view 2,
+constexpr float OVER_AT_X  = 1.5f,  OVER_AT_Y  = 3.0f, OVER_AT_Z  = 1.0f;   // a corner
 
-constexpr float FREE_ZNEAR = 0.2f;
+constexpr float ORBIT_MAX  = 90.0f;         // degrees either way: never behind the panel
 constexpr float FREE_SPEED = 3.0f;          // units per second
 constexpr float FREE_TURN  = 90.0f;         // degrees per second of turning
-constexpr float FREE_RADIUS = 22.0f;
-constexpr float FREE_Y_MIN = 0.3f, FREE_Y_MAX = 20.0f;
+
+// Every view, preset or free, keeps its eye this far inside the walls and
+// between these heights; the top stays under the ceiling beams (9.05).
+constexpr float CAM_MARGIN = 0.5f;
+constexpr float CAM_Y_MIN = 0.3f, CAM_Y_MAX = 8.5f;
 
 // ---- Speed [free] ----------------------------------------------------------
 constexpr float DT_CLAMP  = 0.1f;        // a window drag must not jump anything
@@ -117,25 +122,25 @@ constexpr float STACK_R = 0.10f, STACK_SEG_H = 0.25f;
 constexpr float STACK_Y0 = 5.55f;     // green, amber, red upward
 
 // ---- Room: floor, walls, ceiling [free] ------------------------------------
-constexpr float ROOM_X0 = -6.0f, ROOM_X1 = 9.0f;   // also the floor
-constexpr float ROOM_Z0 = -2.5f, ROOM_Z1 = 5.5f;
-constexpr int   FLOOR_NX = 15, FLOOR_NZ = 8;       // floor tiles
+constexpr float ROOM_X0 = -10.0f, ROOM_X1 = 13.0f; // also the floor
+constexpr float ROOM_Z0 = -2.5f,  ROOM_Z1 = 13.5f; // back wall stays behind the panel
+constexpr int   FLOOR_NX = 23, FLOOR_NZ = 16;      // floor tiles
 constexpr float CEIL_Y  = 9.5f;
 constexpr float WALL_CELL = 1.0f;     // outlined: reads as wall panels
 constexpr float DADO_H = 1.20f, TRIM_H = 0.06f;    // concrete plinth band
 
-constexpr float BEAM_X0 = -3.90f, BEAM_PITCH = 3.00f;   // ceiling I-beams,
-constexpr int   BEAM_N = 5;                             // front to back
+constexpr float BEAM_X0 = -7.00f, BEAM_PITCH = 3.00f;   // ceiling I-beams,
+constexpr int   BEAM_N = 7;                             // front to back
 constexpr float BEAM_D = 0.45f, BEAM_W = 0.30f, BEAM_T = 0.05f;
 
 // ---- Room: windows [free] --------------------------------------------------
 constexpr float WIN_Y0 = 5.20f, WIN_H = 1.80f, WIN_W = 1.80f;
 constexpr float WIN_FRAME = 0.08f, WIN_DEPTH = 0.10f;
 constexpr float WIN_BAR = 0.05f;      // the cross bar that splits it in four
-constexpr float BWIN_X[2] = { -4.50f, 7.60f };          // back wall, world x
-constexpr float LWIN_Z[2] = { -1.30f, 2.20f };          // left wall, world z
-constexpr float RWIN_Z[2] = { -0.40f, 3.00f };          // right wall, world z
-constexpr float FWIN_X[3] = { -3.00f, 1.50f, 6.00f };   // front wall, world x
+constexpr float BWIN_X[4] = { -7.50f, -4.50f, 7.60f, 10.50f };          // back wall, world x
+constexpr float LWIN_Z[4] = { -1.30f, 2.70f, 6.70f, 10.70f };           // left wall, world z
+constexpr float RWIN_Z[4] = { -0.40f, 3.60f, 7.60f, 11.60f };           // right wall, world z
+constexpr float FWIN_X[5] = { -7.00f, -2.50f, 2.00f, 6.50f, 11.00f };   // front wall, world x
 
 // ---- Room: bulbs [free] ----------------------------------------------------
 constexpr float BULB_X[2] = { -0.57f, 4.80f };     // left, right
@@ -169,6 +174,12 @@ constexpr float HAZ_W = 0.10f, HAZ_Y = 0.004f;
 constexpr float PAL_X[2] = { -4.10f, 5.40f }, PAL_Z[2] = { 2.50f, 2.70f };
 constexpr float PAL_S = 1.20f, PAL_TOP = 0.13f;     // size, deck height
 constexpr float PAL_PITCH = 0.38f;    // 3 x 3 blanks per layer
+
+// The bin past the head roller: an open box.  Each stamped blank that leaves
+// the belt lands in it, nine to a layer, until BIN_LAYERS layers fill it.
+constexpr float BIN_X = 5.40f, BIN_Z = 0.00f;
+constexpr float BIN_S = 1.30f, BIN_H = 0.50f, BIN_T = 0.05f;   // size, height, wall
+constexpr int   BIN_LAYERS = 4;
 
 constexpr float CAB_X0 = 6.20f, CAB_X1 = 7.60f, CAB_H = 2.40f, CAB_D = 0.51f;
 // Switches on the cabinet door, left to right: machine, left bulb, right bulb,
